@@ -372,6 +372,7 @@ function ArticleEditor({
                 onClick={() => {
                   setRemoved((r) => [...r, locale]);
                   setDraft(({ [locale]: _, ...rest }) => rest);
+                  setUntitledLocale((u) => (u === locale ? null : u));
                 }}
               >
                 Remove {locale.toUpperCase()} translation

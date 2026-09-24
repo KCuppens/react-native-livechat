@@ -20,7 +20,7 @@ const CONTACT_ROOM_REFRESH_MS = 24 * 60 * 60 * 1000;
 const CONTACT_ROOM_WRITES_MAX = 5000;
 /** Durable Object storage deletes at most 128 keys per call. */
 const STORAGE_DELETE_BATCH = 128;
-/** Rooms whose contact disconnect failed, retried by the alarm (see retryPendingDisconnects). */
+/** Rooms whose contact disconnect failed, retried by alarm() (see scheduleDisconnectRetry). */
 const PENDING_DISCONNECT_KEY = "pendingDisconnect";
 const DISCONNECT_RETRY_ATTEMPTS = 5;
 const DISCONNECT_RETRY_BASE_MS = 5_000;
@@ -91,8 +91,16 @@ export class WorkspaceInbox extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const pending = await this.ctx.storage.get<PendingDisconnect>(PENDING_DISCONNECT_KEY);
     if (!pending) return;
-    const failed = await this.disconnectRooms(pending.rooms, pending.minEpoch);
+    // Take the entry before the RPCs: a rotation during them queues (and merges) a new one,
+    // which a delete afterwards would wipe out.
     await this.ctx.storage.delete(PENDING_DISCONNECT_KEY);
+    let failed: string[];
+    try {
+      failed = await this.disconnectRooms(pending.rooms, pending.minEpoch);
+    } catch (err) {
+      await this.scheduleDisconnectRetry(pending.minEpoch, pending.rooms, pending.attempt);
+      throw err;
+    }
     if (failed.length === 0) return;
     if (pending.attempt >= DISCONNECT_RETRY_ATTEMPTS) {
       console.error({ msg: "disconnectContacts gave up on rooms", rooms: failed.slice(0, 50), failed: failed.length, minEpoch: pending.minEpoch });

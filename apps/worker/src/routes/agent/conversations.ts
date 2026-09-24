@@ -90,7 +90,10 @@ export const agentConversationRoutes = new Hono<AppBindings>()
     // undone (nothing happened after it) or is announced, since that request didn't see it.
     if (!created && reopenedNotice) {
       await afterResponse(c, async () => {
-        const undone = await undoReopen(c.env.DB, row.id, reopenedNotice.id).catch(() => false);
+        const undone = await undoReopen(c.env.DB, row.id, reopenedNotice.id).catch((e) => {
+          console.error({ msg: "undo reopen failed", conversationId: row.id, error: String(e) });
+          return false;
+        });
         if (undone) return;
         await bestEffort("realtime", async () => {
           await publishToConversation(c.env, row.id, { type: "message.created", message: reopenedNotice });
@@ -183,12 +186,18 @@ export const agentConversationRoutes = new Hono<AppBindings>()
         } catch (err) {
           // Undo the transition so a retry redoes it with its notices (and the rating request):
           // otherwise the retry sees the status already set and skips them for good.
-          await c.env.DB.batch([
+          const reverted = await c.env.DB.batch([
             c.env.DB.prepare("UPDATE conversations SET status = ? WHERE id = ? AND status = ?").bind(row.status, row.id, body.status),
             ...(csatClaimed ? [c.env.DB.prepare("UPDATE conversations SET csat_requested_at = NULL WHERE id = ?").bind(row.id)] : []),
             ...systemMessages.slice(firstNotice).map((m) => c.env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(m.id)),
             c.env.DB.prepare(LAST_MESSAGE_RESYNC_SQL).bind(row.id),
-          ]).catch((e) => console.error({ msg: "status revert failed", conversationId: row.id, error: String(e) }));
+          ]).then(
+            () => true,
+            (e) => {
+              console.error({ msg: "status revert failed", conversationId: row.id, error: String(e) });
+              return false;
+            },
+          );
           // An assignment made earlier in this request is committed: announce it anyway (a
           // retry sees it already applied and wouldn't).
           const assigned = systemMessages.slice(0, firstNotice);
@@ -196,7 +205,8 @@ export const agentConversationRoutes = new Hono<AppBindings>()
             await afterResponse(c, async () => {
               await bestEffort("realtime", async () => {
                 for (const message of assigned) await publishToConversation(c.env, row.id, { type: "message.created", message });
-                await publishToConversation(c.env, row.id, { type: "status.changed", status: row.status, assigneeId: body.assigneeId ?? null });
+                // If the revert failed too, the new status stands: say what's stored.
+                await publishToConversation(c.env, row.id, { type: "status.changed", status: reverted ? row.status : status, assigneeId: body.assigneeId ?? null });
               });
               await bestEffort("inbox update", () => conversationChanged(c.env, workspaceId, row.id));
             });

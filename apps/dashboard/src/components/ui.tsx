@@ -66,7 +66,8 @@ export function Toaster() {
     showToast = (m) => {
       setMsg(m);
       clearTimeout(t);
-      t = setTimeout(() => setMsg(null), 3000);
+      // Long enough to read: longer messages (e.g. what to tell an invitee) stay longer.
+      t = setTimeout(() => setMsg(null), Math.max(3000, m.length * 70));
     };
   }, []);
   return msg ? <div className="toast" role="status">{msg}</div> : null;

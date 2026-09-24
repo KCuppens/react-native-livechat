@@ -181,20 +181,15 @@ export async function getArticleBySlug(db: D1Database, ws: WorkspaceRow, slug: s
   const locales = contentLocales(ws, locale);
   // The slug may belong to any locale (shared links); then serve the best available translation.
   // locale IN (every workspace locale) turns this into equality seeks on UNIQUE(workspace_id,
-  // locale, slug) instead of scanning the workspace's translations.
+  // locale, slug) instead of scanning the workspace's translations. Slugs of a disabled
+  // language don't resolve: disabling a language hides its articles.
   const all = JSON.parse(ws.locales) as string[];
-  let hit = await db
+  const hit = await db
     .prepare(
       `SELECT article_id FROM faq_article_translations
        WHERE workspace_id = ? AND locale IN (${localePlaceholders(all)}) AND slug = ? AND published = 1 ORDER BY locale = ? DESC LIMIT 1`,
     )
     .bind(ws.id, ...all, slug, locales[0])
-    .first<{ article_id: string }>();
-  // A slug from a language that was disabled later: shared links keep working (served in the
-  // best enabled language below). Rare, so the unindexed lookup is only the fallback.
-  hit ??= await db
-    .prepare("SELECT article_id FROM faq_article_translations WHERE workspace_id = ? AND slug = ? AND published = 1 LIMIT 1")
-    .bind(ws.id, slug)
     .first<{ article_id: string }>();
   if (!hit) throw new ApiException(404, "article_not_found", "Article not found");
   const { results } = await db

@@ -11,6 +11,8 @@ import { contactName } from "../conversation/format";
 type AssigneeFilter = "all" | "me" | "unassigned";
 
 const NOTIFY_DISMISSED_KEY = "lc-notify-dismissed";
+/** "Not now" hides the notification prompt for a week, not forever (it's the only way to enable them). */
+const NOTIFY_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function matchesFilter(c: AgentConversation, status: ConversationStatus, assignee: AssigneeFilter, meId: string) {
   if (c.status !== status) return false;
@@ -90,7 +92,7 @@ export function InboxPage({
   const [notifyPermission, setNotifyPermission] = useState(() => (typeof Notification === "undefined" ? "unsupported" : Notification.permission));
   const [notifyDismissed, setNotifyDismissed] = useState(() => {
     try {
-      return localStorage.getItem(NOTIFY_DISMISSED_KEY) === "1";
+      return Date.now() - Number(localStorage.getItem(NOTIFY_DISMISSED_KEY) ?? 0) < NOTIFY_SNOOZE_MS;
     } catch {
       return false;
     }
@@ -177,7 +179,7 @@ export function InboxPage({
                 onClick={() => {
                   setNotifyDismissed(true);
                   try {
-                    localStorage.setItem(NOTIFY_DISMISSED_KEY, "1");
+                    localStorage.setItem(NOTIFY_DISMISSED_KEY, String(Date.now()));
                   } catch {
                     // Storage blocked: hidden for this visit only.
                   }
