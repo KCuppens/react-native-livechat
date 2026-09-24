@@ -105,6 +105,16 @@ describe("workspace key and CORS", () => {
     expect((await call("/v1/config")).status).toBe(200);
   });
 
+  it("allows the API's own origin, which React Native sends on socket upgrades", async () => {
+    const { app } = await import("../src/index");
+    const { publishableKey: key } = await setupWorkspace({ allowedOrigins: ["https://app.acme.com"] });
+    const own = new URL(env.PUBLIC_URL).origin;
+    const res = await app.request("/v1/config", { headers: { "X-Livechat-Key": key, Origin: own } }, env);
+    expect(res.status).toBe(200);
+    const other = await app.request("/v1/config", { headers: { "X-Livechat-Key": key, Origin: "https://acme.test" } }, env);
+    expect(other.status).toBe(403);
+  });
+
   it("answers preflights", async () => {
     const { app } = await import("../src/index");
     const res = await app.request("/v1/session", { method: "OPTIONS", headers: { Origin: "https://x.dev" } }, env);

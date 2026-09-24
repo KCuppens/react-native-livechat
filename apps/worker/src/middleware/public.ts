@@ -43,7 +43,9 @@ export const requireWorkspace = createMiddleware<AppBindings>(async (c, next) =>
   if (!ws) throw new ApiException(401, "invalid_key", "Unknown publishable key");
 
   const origin = c.req.header("Origin");
-  if (origin) {
+  // React Native's WebSocket sends the socket's own origin as Origin (Android and iOS). Only this
+  // API's own pages live there, so it is not a cross-site request and needs no allow-list entry.
+  if (origin && origin !== new URL(c.env.PUBLIC_URL).origin) {
     const allowed = allowedOrigins(ws);
     if (!allowed.includes("*") && !allowed.includes(origin)) {
       throw new ApiException(403, "origin_not_allowed", `Origin ${origin} is not allowed for this workspace`);
