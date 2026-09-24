@@ -1,0 +1,24 @@
+{
+  "name": "react-native-livechat",
+  "private": true,
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "changeset": "changeset",
+    "release": "turbo run build --filter=./packages/* && changeset publish",
+    "coverage": "turbo run coverage --concurrency=1",
+    "lint": "biome lint ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@changesets/cli": "^3.0.3",
+    "@vitest/coverage-istanbul": "~4.1.11",
+    "turbo": "^2.11.3",
+    "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

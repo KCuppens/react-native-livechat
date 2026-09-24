@@ -1,0 +1,9 @@
+# Copy to .dev.vars for `wrangler dev`. Generate real values for production with `wrangler secret put`.
+PUBLIC_URL=http://localhost:8787
+EMAIL_FROM=support@example.com
+CONTACT_JWT_SECRET=dev-only-change-me
+ATTACHMENT_SIGNING_KEY=dev-only-change-me-too
+# 32 random bytes, base64:  node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ENCRYPTION_KEY=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+SUPER_ADMIN_EMAILS=you@example.com
+DEV_EMAIL_LOG=true

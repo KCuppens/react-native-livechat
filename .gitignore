@@ -1,0 +1,10 @@
+node_modules
+dist
+.turbo
+.wrangler
+.dev.vars
+*.log
+.DS_Store
+coverage
+.testproof-cache
+.optimizer-cache/

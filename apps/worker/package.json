@@ -1,0 +1,27 @@
+{
+  "name": "@livechat/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cf-typegen": "wrangler types --include-runtime false",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply livechat --local",
+    "deploy": "wrangler deploy",
+    "coverage": "vitest run --coverage --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json-summary --coverage.reporter=json --coverage.include=\"src/**\" --coverage.exclude=\"**/*.test.*\" --coverage.exclude=\"**/test-utils.ts\" --coverage.exclude=\"**/__tests__/**\"",
+    "load": "k6 run load/chat.k6.js"
+  },
+  "dependencies": {
+    "@kobecuppens/livechat-protocol": "workspace:*",
+    "hono": "^4.13.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260924.1",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.137.0",
+    "@livechat/dashboard": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Livechat Example",
+    "slug": "livechat-example",
+    "scheme": "livechat-example",
+    "ios": { "bundleIdentifier": "com.example.livechat" },
+    "android": { "package": "com.example.livechat" },
+    "plugins": [
+      ["expo-notifications", { "defaultChannel": "livechat" }],
+      ["expo-image-picker", { "photosPermission": "Attach screenshots to your support conversations." }]
+    ],
+    "extra": {
+      "livechatApiUrl": "http://localhost:8787",
+      "livechatKey": "pk_replace_me"
+    }
+  }
+}

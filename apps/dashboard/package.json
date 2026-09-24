@@ -1,0 +1,29 @@
+{
+  "name": "@livechat/dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json-summary --coverage.reporter=json --coverage.include=\"src/**\" --coverage.exclude=\"**/*.test.*\" --coverage.exclude=\"**/test-utils.ts\" --coverage.exclude=\"**/__tests__/**\""
+  },
+  "dependencies": {
+    "@kobecuppens/livechat-core": "workspace:*",
+    "@kobecuppens/livechat-protocol": "workspace:*",
+    "@kobecuppens/livechat-react": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "happy-dom": "^20.14.5",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.0",
+    "vitest": "^4.1.0"
+  }
+}

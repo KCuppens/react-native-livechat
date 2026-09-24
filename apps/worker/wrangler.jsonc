@@ -1,0 +1,67 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "livechat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // The dashboard SPA is served as static assets. API paths must run the Worker first:
+  // browser navigations (e.g. opening an attachment link) otherwise hit the asset layer and 404.
+  "assets": {
+    "directory": "../dashboard/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/v1/*", "/agent/*", "/files/*", "/health"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "livechat",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "ATTACHMENTS", "bucket_name": "livechat-attachments" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "CONVERSATION_ROOM", "class_name": "ConversationRoom" },
+      { "name": "WORKSPACE_INBOX", "class_name": "WorkspaceInbox" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ConversationRoom", "WorkspaceInbox"] }
+  ],
+  "queues": {
+    "producers": [{ "binding": "NOTIFICATIONS", "queue": "livechat-notifications" }],
+    // Jobs that fail every retry land in the DLQ (kept for inspection/replay) instead of vanishing.
+    "consumers": [
+      {
+        "queue": "livechat-notifications",
+        "max_batch_size": 20,
+        "max_batch_timeout": 2,
+        "max_retries": 3,
+        "dead_letter_queue": "livechat-notifications-dlq"
+      }
+    ]
+  },
+  "ratelimits": [
+    { "name": "SESSION_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
+    { "name": "MESSAGE_LIMITER", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+  ],
+  // Deployment-specific settings are NOT in this file, so a (CI) deploy can't reset them to dev
+  // values. Set them once in Cloudflare (dashboard variables or `wrangler secret put`):
+  //   PUBLIC_URL          - the Worker's https URL (requests fail with "misconfigured" otherwise)
+  //   EMAIL_FROM          - sender address on the onboarded email domain
+  //   SUPER_ADMIN_EMAILS  - comma-separated emails allowed to create workspaces
+  // keep_vars stops `wrangler deploy` from deleting variables set in the dashboard.
+  // Local dev reads them from .dev.vars.
+  "keep_vars": true
+  // Email: add  "send_email": [{ "name": "EMAIL" }]  once the EMAIL_FROM domain is onboarded
+  // (npx wrangler email sending enable <domain>). Without it, sending fails with an error (bodies are
+  // never logged: sign-in links are credentials). For local dev set DEV_EMAIL_LOG=true in .dev.vars.
+  // Secrets (wrangler secret put / .dev.vars):
+  //   CONTACT_JWT_SECRET  - signs contact session tokens
+  //   ATTACHMENT_SIGNING_KEY - signs attachment download URLs
+  //   ENCRYPTION_KEY      - base64 32-byte AES-GCM key for identity secrets and push credentials
+}

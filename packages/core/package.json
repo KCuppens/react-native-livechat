@@ -1,0 +1,53 @@
+{
+  "name": "@kobecuppens/livechat-core",
+  "version": "0.0.0",
+  "description": "Headless live chat + help center client (REST, realtime, outbox, i18n)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json-summary --coverage.reporter=json --coverage.include=\"src/**\" --coverage.exclude=\"**/*.test.*\" --coverage.exclude=\"**/test-utils.ts\" --coverage.exclude=\"**/__tests__/**\""
+  },
+  "dependencies": {
+    "@kobecuppens/livechat-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KCuppens/react-native-livechat.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "live chat",
+    "support",
+    "help center",
+    "faq",
+    "knowledge base",
+    "react",
+    "react-native",
+    "cloudflare"
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "name": "@kobecuppens/livechat-react",
+  "version": "0.0.0",
+  "description": "React hooks + web UI for the livechat kit: help center, live chat, launcher",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.js",
+      "require": "./dist/hooks.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts src/hooks.ts --format esm,cjs --dts --clean --external react --external react-dom",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json-summary --coverage.reporter=json --coverage.include=\"src/**\" --coverage.exclude=\"**/*.test.*\" --coverage.exclude=\"**/test-utils.ts\" --coverage.exclude=\"**/__tests__/**\""
+  },
+  "dependencies": {
+    "@kobecuppens/livechat-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18.2"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "happy-dom": "^20.14.5",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KCuppens/react-native-livechat.git",
+    "directory": "packages/react"
+  },
+  "keywords": [
+    "live chat",
+    "support",
+    "help center",
+    "faq",
+    "knowledge base",
+    "react",
+    "react-native",
+    "cloudflare"
+  ]
+}

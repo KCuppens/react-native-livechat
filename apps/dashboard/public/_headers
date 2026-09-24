@@ -1,0 +1,8 @@
+# Applied by Workers static assets to the dashboard. The console renders customer-supplied
+# content (names, messages, attachments), so lock down what it may load and who may frame it.
+# img-src allows https: for help-article previews (FAQ images are external URLs; chat renders none).
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff

@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+  - apps/*
+  - examples/web
+allowBuilds:
+  "@parcel/watcher": false
+  unrs-resolver: false
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - '@cloudflare/workers-types@5.20260924.1'
+  - hono@4.13.9
+  - wrangler@4.137.0

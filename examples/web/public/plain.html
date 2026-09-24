@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Livechat example (script tag)</title>
+  </head>
+  <body style="font-family: system-ui; padding: 40px">
+    <h1>Any website</h1>
+    <p>This page embeds the widget with one script tag. Edit the key below.</p>
+    <button onclick="LiveChat('open', { name: 'new' })">Contact support</button>
+    <button onclick="LiveChat('identify', { id: 'demo-user', hash: prompt('userHash for demo-user') })">Identify as demo-user</button>
+
+    <!-- Queue commands before the script loads -->
+    <script>
+      window.LiveChat = window.LiveChat || function () { (LiveChat.q = LiveChat.q || []).push(arguments); };
+      LiveChat("onUnreadChange", (n) => (document.title = n ? `(${n}) Plain demo` : "Plain demo"));
+    </script>
+    <script src="/widget.js" data-api-url="http://localhost:8787" data-workspace-key="pk_replace_me" async></script>
+  </body>
+</html>

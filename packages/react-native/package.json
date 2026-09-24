@@ -1,0 +1,72 @@
+{
+  "name": "@kobecuppens/livechat-react-native",
+  "version": "0.0.0",
+  "description": "React Native help center + live chat (Expo and bare RN)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "react-native": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "react-native": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --external react --external react-native --external @react-native-async-storage/async-storage",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "coverage": "jest --coverage --coverageReporters=json-summary --coverageReporters=json --collectCoverageFrom=\"src/**/*.{ts,tsx}\" --collectCoverageFrom=\"!src/**/__tests__/**\""
+  },
+  "dependencies": {
+    "@kobecuppens/livechat-core": "workspace:*",
+    "@kobecuppens/livechat-react": "workspace:*"
+  },
+  "peerDependencies": {
+    "@react-native-async-storage/async-storage": ">=1.21",
+    "react": ">=18.2",
+    "react-native": ">=0.74"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-native/babel-preset": "^0.87.1",
+    "@react-native/jest-preset": "^0.87.1",
+    "@testing-library/react-native": "^14.0.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^19.3.0",
+    "babel-jest": "^30.5.2",
+    "jest": "^30.5.2",
+    "react": "^19.3.0",
+    "react-native": "^0.87.1",
+    "test-renderer": "^1.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KCuppens/react-native-livechat.git",
+    "directory": "packages/react-native"
+  },
+  "keywords": [
+    "live chat",
+    "support",
+    "help center",
+    "faq",
+    "knowledge base",
+    "react",
+    "react-native",
+    "cloudflare"
+  ]
+}

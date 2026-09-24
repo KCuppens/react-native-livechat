@@ -1,0 +1,58 @@
+{
+  "name": "@kobecuppens/livechat-protocol",
+  "version": "0.0.0",
+  "description": "Shared wire types and zod schemas for the livechat kit",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./constants": {
+      "types": "./dist/constants.d.ts",
+      "import": "./dist/constants.js",
+      "require": "./dist/constants.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts src/constants.ts --format esm,cjs --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json-summary --coverage.reporter=json --coverage.include=\"src/**\" --coverage.exclude=\"**/*.test.*\" --coverage.exclude=\"**/test-utils.ts\" --coverage.exclude=\"**/__tests__/**\""
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KCuppens/react-native-livechat.git",
+    "directory": "packages/protocol"
+  },
+  "keywords": [
+    "live chat",
+    "support",
+    "help center",
+    "faq",
+    "knowledge base",
+    "react",
+    "react-native",
+    "cloudflare"
+  ]
+}

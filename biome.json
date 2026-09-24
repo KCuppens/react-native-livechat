@@ -1,0 +1,99 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/coverage",
+      "!**/.wrangler",
+      "!**/dist-check",
+      "!**/*.json",
+      "!examples/expo",
+      "!examples/web/public",
+      "!apps/dashboard/public",
+      "!apps/worker/load"
+    ]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "noNonNullAssertion": "off",
+        "useTemplate": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "off"
+      },
+      "a11y": {
+        "noAutofocus": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/react/src/web/icons.tsx",
+        "apps/dashboard/src/components/ui.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noSvgWithoutTitle": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/core/src/markdown.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noAssignInExpressions": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/react/src/web/markdown.tsx",
+        "packages/react-native/src/Markdown.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noArrayIndexKey": "off",
+            "useIterableCallbackReturn": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/test/**"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnsafeOptionalChaining": "off"
+          }
+        }
+      }
+    }
+  ]
+}
