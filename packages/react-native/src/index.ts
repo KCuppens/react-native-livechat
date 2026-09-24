@@ -5,6 +5,8 @@ export { asyncStorageAdapter } from "./storage";
 export type { Theme, ThemeOverrides } from "./theme";
 export {
   useArticle,
+  useArticleSuggestions,
+  useCategoryArticles,
   useConversation,
   useConversations,
   useHelpHome,

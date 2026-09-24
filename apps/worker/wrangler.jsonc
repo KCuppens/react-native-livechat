@@ -1,10 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "livechat",
+  "account_id": "89a137f234e5fc487144c9eb4051d397",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "routes": [{ "pattern": "chat.1pbettereveryday.app", "custom_domain": true }],
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@mail.1pbettereveryday.app"] }],
   // The dashboard SPA is served as static assets. API paths must run the Worker first:
   // browser navigations (e.g. opening an attachment link) otherwise hit the asset layer and 404.
   "assets": {
@@ -16,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "livechat",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "7c3bbc8f-9fcd-434a-9102-a91b2ebbd72f",
       "migrations_dir": "migrations"
     }
   ],
@@ -57,9 +60,8 @@
   // keep_vars stops `wrangler deploy` from deleting variables set in the dashboard.
   // Local dev reads them from .dev.vars.
   "keep_vars": true
-  // Email: add  "send_email": [{ "name": "EMAIL" }]  once the EMAIL_FROM domain is onboarded
-  // (npx wrangler email sending enable <domain>). Without it, sending fails with an error (bodies are
-  // never logged: sign-in links are credentials). For local dev set DEV_EMAIL_LOG=true in .dev.vars.
+  // Email: send_email above sends from the onboarded mail.1pbettereveryday.app domain (EMAIL_FROM must
+  // be that address). For local dev set DEV_EMAIL_LOG=true in .dev.vars (bodies are never logged in prod).
   // Secrets (wrangler secret put / .dev.vars):
   //   CONTACT_JWT_SECRET  - signs contact session tokens
   //   ATTACHMENT_SIGNING_KEY - signs attachment download URLs

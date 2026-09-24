@@ -68,5 +68,10 @@
     "react",
     "react-native",
     "cloudflare"
-  ]
+  ],
+  "peerDependenciesMeta": {
+    "@react-native-async-storage/async-storage": {
+      "optional": true
+    }
+  }
 }
