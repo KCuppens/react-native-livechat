@@ -22,8 +22,12 @@ const CONTACT_ROOM_WRITES_MAX = 5000;
 const STORAGE_DELETE_BATCH = 128;
 /** Rooms whose contact disconnect failed, retried by alarm() (see scheduleDisconnectRetry). */
 const PENDING_DISCONNECT_KEY = "pendingDisconnect";
-const DISCONNECT_RETRY_ATTEMPTS = 5;
-const DISCONNECT_RETRY_BASE_MS = 5_000;
+/** 30s, 1m, 2m, … capped at 30m: about 2 hours of retrying before a room is dead-lettered. */
+const DISCONNECT_RETRY_ATTEMPTS = 10;
+const DISCONNECT_RETRY_BASE_MS = 30_000;
+const DISCONNECT_RETRY_MAX_MS = 30 * 60_000;
+/** Rooms still unreachable after all retries; the next rotation tries them again. */
+const DEAD_DISCONNECT_KEY = "deadDisconnect";
 /** Parallel room RPCs when disconnecting contacts. */
 const DISCONNECT_BATCH = 50;
 
@@ -83,8 +87,11 @@ export class WorkspaceInbox extends DurableObject<Env> {
    * Rooms that couldn't be reached are retried by the alarm with backoff.
    */
   async disconnectContacts(minEpoch: number): Promise<void> {
-    const failed = await this.disconnectTrackedRooms(minEpoch);
-    if (failed.length > 0) await this.scheduleDisconnectRetry(minEpoch, failed, 1);
+    // Rooms given up on earlier (tracked or not anymore): the new epoch covers their old tokens too.
+    const dead = await this.ctx.storage.get<string[]>(DEAD_DISCONNECT_KEY);
+    if (dead) await this.ctx.storage.delete(DEAD_DISCONNECT_KEY);
+    const failed = [...(await this.disconnectTrackedRooms(minEpoch)), ...(dead ? await this.disconnectRooms(dead, minEpoch) : [])];
+    if (failed.length > 0) await this.scheduleDisconnectRetry(minEpoch, [...new Set(failed)], 1);
   }
 
   /** Alarm: retries rooms whose contact disconnect failed, with backoff, then gives up (logged). */
@@ -103,7 +110,9 @@ export class WorkspaceInbox extends DurableObject<Env> {
     }
     if (failed.length === 0) return;
     if (pending.attempt >= DISCONNECT_RETRY_ATTEMPTS) {
-      console.error({ msg: "disconnectContacts gave up on rooms", rooms: failed.slice(0, 50), failed: failed.length, minEpoch: pending.minEpoch });
+      const dead = (await this.ctx.storage.get<string[]>(DEAD_DISCONNECT_KEY)) ?? [];
+      await this.ctx.storage.put(DEAD_DISCONNECT_KEY, [...new Set([...dead, ...failed])]);
+      console.error({ msg: "disconnectContacts gave up on rooms (kept for the next rotation)", rooms: failed.slice(0, 50), failed: failed.length, minEpoch: pending.minEpoch });
       return;
     }
     await this.scheduleDisconnectRetry(pending.minEpoch, failed, pending.attempt + 1);
@@ -119,7 +128,7 @@ export class WorkspaceInbox extends DurableObject<Env> {
       attempt: queued ? Math.min(queued.attempt, attempt) : attempt,
     };
     await this.ctx.storage.put(PENDING_DISCONNECT_KEY, merged);
-    const delay = DISCONNECT_RETRY_BASE_MS * 2 ** (merged.attempt - 1);
+    const delay = Math.min(DISCONNECT_RETRY_MAX_MS, DISCONNECT_RETRY_BASE_MS * 2 ** (merged.attempt - 1));
     await this.ctx.storage.setAlarm(Date.now() + delay + Math.random() * delay * 0.2);
   }
 

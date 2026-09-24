@@ -119,4 +119,22 @@ describe("bulletproof round 3 approved fixes", () => {
       expect(await state.storage.get("pendingDisconnect")).toBeUndefined();
     });
   });
+
+  it("retries dead-lettered rooms on the next rotation", async () => {
+    const { ws, publicCall, contactToken, conversationId } = await withConversation();
+    const inbox = inboxStub(env, ws.id);
+    const sock = (await publicCall(`/v1/conversations/${conversationId}/ws?token=${contactToken}`, { headers: { Upgrade: "websocket" } })).webSocket!;
+    sock.accept();
+    const closed = new Promise<number>((resolve) => sock.addEventListener("close", (e) => resolve(e.code)));
+    // As left by a retry that gave up on this room; untracked, so only the dead-letter list reaches it.
+    await runInDurableObject(inbox, async (_obj, state) => {
+      await state.storage.put("deadDisconnect", [conversationId]);
+      await state.storage.delete(`contactRoom:${conversationId}`);
+    });
+    await inbox.disconnectContacts(99);
+    expect(await closed).toBe(4401);
+    await runInDurableObject(inbox, async (_obj, state) => {
+      expect(await state.storage.get("deadDisconnect")).toBeUndefined();
+    });
+  });
 });
