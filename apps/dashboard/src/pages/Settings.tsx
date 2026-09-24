@@ -14,8 +14,11 @@ const TABS = [
 ] as const;
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-/** ~420 zones; computed once, not on every keystroke in the office-hours form. */
-const TIMEZONES = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
+/**
+ * ~420 zones; computed once, not on every keystroke in the office-hours form. "UTC" (the
+ * default) isn't in V8's list, so it's added explicitly.
+ */
+const TIMEZONES = [...new Set(["UTC", ...(typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [])])];
 
 const LANGUAGES: Record<string, string> = { en: "English", nl: "Nederlands", fr: "Français", de: "Deutsch", es: "Español", it: "Italiano", pt: "Português" };
 
@@ -51,16 +54,7 @@ export function SettingsPage({ me, workspaceId, isAdmin, tab }: { me: AgentMe; w
       </div>
       {!isAdmin && tab !== "canned" && <p className="muted">Only workspace admins can change these settings.</p>}
       {!settings ? (
-        loadFailed ? (
-          <div className="empty">
-            Couldn't load settings.{" "}
-            <button type="button" className="btn btn-sm" onClick={() => setReloadNonce((n) => n + 1)}>
-              Retry
-            </button>
-          </div>
-        ) : (
-          <Spinner />
-        )
+        loadFailed ? <LoadFailed what="settings" onRetry={() => setReloadNonce((n) => n + 1)} /> : <Spinner />
       ) : (
         <fieldset disabled={!isAdmin && tab !== "canned"} style={{ border: 0, padding: 0, margin: 0, maxWidth: 820 }}>
           {tab === "general" && <GeneralTab settings={settings} save={save} />}
@@ -176,7 +170,11 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
   const [autoReply, setAutoReply] = useState(settings.autoReply);
   const [typical, setTypical] = useState(settings.typicalReplyMinutes?.toString() ?? "");
   const [saving, run] = useBusy();
-  const timezoneOptions = useMemo(() => TIMEZONES.map((tz) => <option key={tz}>{tz}</option>), []);
+  // A saved zone the browser doesn't list must still show as selected (not silently the first one).
+  const timezoneOptions = useMemo(
+    () => (TIMEZONES.includes(settings.officeHours.timezone) ? TIMEZONES : [settings.officeHours.timezone, ...TIMEZONES]).map((tz) => <option key={tz}>{tz}</option>),
+    [settings.officeHours.timezone],
+  );
   const windowFor = (day: number) => hours.windows.find((w) => w.day === day);
   const setDay = (day: number, w: { open: string; close: string } | null) =>
     setHours({ ...hours, windows: [...hours.windows.filter((x) => x.day !== day), ...(w ? [{ day, ...w }] : [])].sort((a, b) => a.day - b.day) });
@@ -407,10 +405,10 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
             e.preventDefault();
             await run(() =>
               attempt(async () => {
-                await api.invite(workspaceId, { email: email.trim(), name: name.trim() || undefined, role });
+                const added = await api.invite(workspaceId, { email: email.trim(), name: name.trim() || undefined, role });
                 setEmail("");
                 setName("");
-                toast("Invite sent");
+                toast(added.inviteEmailSent ? "Invite sent" : "Added. No email sent: this address got several sign-in emails recently. They can use one of those.");
                 void reload();
               }, "Invite failed"),
             );

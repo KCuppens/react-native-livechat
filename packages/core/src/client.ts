@@ -80,6 +80,14 @@ interface StoredSession {
   userId: string | null;
 }
 
+interface LoadEntry {
+  /** What to load again after this run, for requests that arrived while it was in flight. */
+  again: "none" | "messages" | "full";
+  resolveFirst?: () => void;
+  next?: Promise<void>;
+  resolveNext?: () => void;
+}
+
 /** Local id for the not-yet-created conversation used by `sendMessage(null, …)`. */
 export const DRAFT_CONVERSATION = "draft";
 
@@ -150,7 +158,7 @@ export class LiveChatClient {
    * In-flight loads per conversation. A load requested while one runs is coalesced into a single
    * follow-up after it (its read may predate whatever triggered the new request).
    */
-  private loads = new Map<string, { run: Promise<void>; again: "none" | "messages" | "full" }>();
+  private loads = new Map<string, LoadEntry>();
   /** Last registered push device, moved to the new identity on login/logout. */
   private pushDevice: PushDeviceRequest | null = null;
   /** The push device still has to be registered with the current identity (a move failed). */
@@ -519,17 +527,25 @@ export class LiveChatClient {
   private loadLatest(conversationId: string, what: "full" | "messages" = "full"): Promise<void> {
     const inflight = this.loads.get(conversationId);
     if (inflight) {
+      // Coalesced: resolves once the follow-up (which covers this request) has run.
       if (inflight.again !== "full") inflight.again = what;
-      return inflight.run;
+      inflight.next ??= new Promise<void>((resolve) => {
+        inflight.resolveNext = resolve;
+      });
+      return inflight.next;
     }
     const epoch = this.epoch;
-    const entry: { run: Promise<void>; again: "none" | "messages" | "full" } = { run: Promise.resolve(), again: "none" };
-    entry.run = this.fetchLatest(conversationId, what).finally(() => {
-      if (this.loads.get(conversationId) === entry) this.loads.delete(conversationId);
-      if (entry.again !== "none" && epoch === this.epoch) void this.loadLatest(conversationId, entry.again);
-    });
+    const entry: LoadEntry = { again: "none" };
     this.loads.set(conversationId, entry);
-    return entry.run;
+    void this.fetchLatest(conversationId, what).finally(() => {
+      if (this.loads.get(conversationId) === entry) this.loads.delete(conversationId);
+      const followUp = entry.again !== "none" && epoch === this.epoch ? this.loadLatest(conversationId, entry.again) : Promise.resolve();
+      void followUp.then(() => entry.resolveNext?.());
+      entry.resolveFirst?.();
+    });
+    return new Promise<void>((resolve) => {
+      entry.resolveFirst = resolve;
+    });
   }
 
   private async fetchLatest(conversationId: string, what: "full" | "messages"): Promise<void> {

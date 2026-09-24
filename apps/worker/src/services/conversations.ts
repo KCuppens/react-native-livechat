@@ -232,14 +232,14 @@ export async function unreadCountForContact(db: D1Database, contactId: string): 
   return row?.n ?? 0;
 }
 
+/** How old an unsaved message's claim must be before another attempt may take its files. */
+const ORPHAN_CLAIM_AGE_MS = 30_000;
+
 /**
  * Atomically claims uploaded attachments for message `messageId`. They must belong to the
  * uploader, be in the same workspace and not be on another message. The UPDATE's own
  * `message_id IS NULL` guard makes two concurrent sends unable to claim the same file.
  */
-/** How old an unsaved message's claim must be before another attempt may take its files. */
-const ORPHAN_CLAIM_AGE_MS = 30_000;
-
 async function claimAttachments(
   db: D1Database,
   messageId: string,
@@ -373,7 +373,20 @@ export async function insertMessage(
         if (existing) return { message: existing, created: false, extraResults: [] };
       }
       // Nobody saved it: any claim left on these files is an orphan from a failed attempt.
-      attachments = await claimAttachments(db, id, input.workspaceId, uploader, input.attachmentIds ?? [], { reclaimOrphans: true });
+      try {
+        attachments = await claimAttachments(db, id, input.workspaceId, uploader, ids, { reclaimOrphans: true });
+      } catch (reclaimErr) {
+        // Still held by an attempt that may be in flight (too young to take over): that clears
+        // up by itself, so answer "retry shortly" (5xx: the SDK retries), not "invalid file".
+        const young = await db
+          .prepare(
+            `SELECT 1 FROM attachments WHERE id IN (${ids.map(() => "?").join(",")}) AND message_id NOT IN (SELECT id FROM messages) AND claimed_at >= ? LIMIT 1`,
+          )
+          .bind(...ids, Date.now() - ORPHAN_CLAIM_AGE_MS)
+          .first();
+        if (young) throw new ApiException(503, "attachment_busy", "The attachments are still being sent; try again shortly");
+        throw reclaimErr;
+      }
     }
   }
   const statements = [
@@ -461,16 +474,15 @@ export async function findConversationByFirstClientId(db: D1Database, contactId:
 }
 
 /**
- * Claims the right to ask for a rating: true for exactly one caller per conversation, so two
- * agents resolving at the same instant can't both post a rating request.
- */
-/**
  * Reopens a resolved conversation and posts the "Reopened" notice. Conditional, so two
  * concurrent callers can't both reopen it. If the notice can't be saved, the reopen is undone
  * so a retry can redo both. Returns the notice, or null if it was already reopened.
  */
 export async function reopenWithNotice(db: D1Database, conversationId: string, workspaceId: string): Promise<Message | null> {
-  const reopened = await db.prepare("UPDATE conversations SET status = 'open' WHERE id = ? AND status = 'resolved' RETURNING id").bind(conversationId).first();
+  const reopened = await db
+    .prepare("UPDATE conversations SET status = 'open' WHERE id = ? AND status = 'resolved' RETURNING last_message_id")
+    .bind(conversationId)
+    .first<{ last_message_id: string | null }>();
   if (!reopened) return null;
   try {
     const { message } = await insertMessage(db, {
@@ -479,8 +491,9 @@ export async function reopenWithNotice(db: D1Database, conversationId: string, w
     return message;
   } catch (err) {
     await db
-      .prepare("UPDATE conversations SET status = 'resolved' WHERE id = ? AND status = 'open'")
-      .bind(conversationId)
+      // Only if nothing was added since (e.g. a concurrent reply that already announced "open").
+      .prepare("UPDATE conversations SET status = 'resolved' WHERE id = ? AND status = 'open' AND last_message_id IS ?")
+      .bind(conversationId, reopened.last_message_id)
       .run()
       .catch((e) => console.error({ msg: "reopen revert failed", conversationId, error: String(e) }));
     throw err;
@@ -499,15 +512,20 @@ export const LAST_MESSAGE_RESYNC_SQL = `UPDATE conversations SET
  * the contact wrote in between, the reopen stands. Returns whether it was undone.
  */
 export async function undoReopen(db: D1Database, conversationId: string, noticeId: string): Promise<boolean> {
-  const undone = await db
-    .prepare("UPDATE conversations SET status = 'resolved' WHERE id = ? AND status = 'open' AND last_message_id = ? RETURNING id")
-    .bind(conversationId, noticeId)
-    .first();
-  if (!undone) return false;
-  await db.batch([db.prepare("DELETE FROM messages WHERE id = ?").bind(noticeId), db.prepare(LAST_MESSAGE_RESYNC_SQL).bind(conversationId)]);
-  return true;
+  // One batch, each statement carrying the condition: either all of it applies or none does.
+  const still = "EXISTS (SELECT 1 FROM conversations WHERE id = ?1 AND status = 'open' AND last_message_id = ?2)";
+  const results = await db.batch([
+    db.prepare(`DELETE FROM messages WHERE id = ?2 AND ${still}`).bind(conversationId, noticeId),
+    db.prepare("UPDATE conversations SET status = 'resolved' WHERE id = ?1 AND status = 'open' AND last_message_id = ?2 RETURNING id").bind(conversationId, noticeId),
+    db.prepare(LAST_MESSAGE_RESYNC_SQL).bind(conversationId),
+  ]);
+  return (results[1]?.results.length ?? 0) > 0;
 }
 
+/**
+ * Claims the right to ask for a rating: true for exactly one caller per conversation, so two
+ * agents resolving at the same instant can't both post a rating request.
+ */
 export async function claimCsatRequest(db: D1Database, conversationId: string): Promise<boolean> {
   const res = await db
     .prepare("UPDATE conversations SET csat_requested_at = ? WHERE id = ? AND csat_requested_at IS NULL")

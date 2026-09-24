@@ -141,7 +141,15 @@ function ArticleList({
                     const votes = a.helpfulCount + a.unhelpfulCount;
                     return (
                       // The row click is a mouse shortcut; the title link is the keyboard/screen-reader path.
-                      <tr key={a.id} className="clickable" onClick={() => navigate(`/w/${workspaceId}/faq/${a.id}`)}>
+                      <tr
+                        key={a.id}
+                        className="clickable"
+                        onClick={(e) => {
+                          // Clicks on the title link (incl. Cmd/Ctrl-click for a new tab) are the link's.
+                          if ((e.target as HTMLElement).closest("a, button") || e.metaKey || e.ctrlKey || e.shiftKey) return;
+                          navigate(`/w/${workspaceId}/faq/${a.id}`);
+                        }}
+                      >
                         <td>
                           <Link to={`/w/${workspaceId}/faq/${a.id}`}>{titleOf(a, locale)}</Link>
                         </td>
@@ -235,9 +243,9 @@ function ArticleEditor({
   const [saving, setSaving] = useState(false);
   const current = draft[locale];
 
-  const [titleError, setTitleError] = useState<string | null>(null);
+  const [untitledLocale, setUntitledLocale] = useState<string | null>(null);
   const setField = (patch: Partial<FaqTranslationInput>) => {
-    if (patch.title?.trim()) setTitleError(null);
+    if (patch.title?.trim()) setUntitledLocale(null);
     setRemoved((r) => r.filter((l) => l !== locale));
     setDraft((d) => ({ ...d, [locale]: { title: "", bodyMd: "", published: false, ...d[locale], ...patch } }));
   };
@@ -248,7 +256,7 @@ function ArticleEditor({
     const untitled = Object.entries(draft).find(([l, t]) => !t.title.trim() && !removed.includes(l) && (t.bodyMd.trim() || article?.translations[l]))?.[0];
     if (untitled) {
       setLocale(untitled);
-      setTitleError(untitled);
+      setUntitledLocale(untitled);
       return;
     }
     const translations: Record<string, FaqTranslationInput | null> = {};
@@ -335,11 +343,14 @@ function ArticleEditor({
               value={current?.title ?? ""}
               onChange={(e) => setField({ title: e.target.value })}
               placeholder="How do I…?"
-              aria-invalid={titleError === locale}
+              aria-invalid={untitledLocale === locale}
+              aria-describedby={untitledLocale === locale ? "untitled-error" : undefined}
             />
-            {titleError === locale && (
-              <div className="error-text" role="alert">
-                Add a title for {locale.toUpperCase()}, or clear its body to leave this language out.
+            {untitledLocale === locale && (
+              <div className="error-text" role="alert" id="untitled-error">
+                {article?.translations[locale]
+                  ? `Add a title for ${locale.toUpperCase()}, or remove the ${locale.toUpperCase()} translation below.`
+                  : `Add a title for ${locale.toUpperCase()}, or clear its body to leave this language out.`}
               </div>
             )}
           </Field>

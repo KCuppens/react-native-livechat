@@ -266,7 +266,9 @@ describe("SettingsPage office hours tab", () => {
 
     const tz = screen.getByLabelText("Timezone") as HTMLSelectElement;
     expect(tz.value).toBe("Europe/Brussels");
-    expect(tz.options.length).toBe(Intl.supportedValuesOf("timeZone").length);
+    // Every browser zone, plus UTC (the default, which V8 doesn't list).
+    expect(tz.options.length).toBe(new Set(["UTC", ...Intl.supportedValuesOf("timeZone")]).size);
+    expect([...tz.options].some((o) => o.value === "UTC")).toBe(true);
     fireEvent.change(tz, { target: { value: "America/New_York" } });
 
     // Monday is open from the fixture; the rest are closed.
@@ -504,7 +506,7 @@ describe("SettingsPage team tab", () => {
     const api = stubApi({
       ...settingsRoutes().routes,
       [`GET ${MEMBERS}`]: () => ({ body: members }),
-      [`POST ${MEMBERS}`]: (init) => ({ body: { id: "ag_new", ...JSON.parse(init.body as string), avatarUrl: null, online: false } }),
+      [`POST ${MEMBERS}`]: (init) => ({ body: { id: "ag_new", ...JSON.parse(init.body as string), avatarUrl: null, online: false, inviteEmailSent: true } }),
     });
     await renderSettings("team");
     await screen.findByText("Bo Other");

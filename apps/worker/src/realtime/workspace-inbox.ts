@@ -16,8 +16,22 @@ const CONTACT_ROOM_PREFIX = "contactRoom:";
 const CONTACT_ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** A tracked room's timestamp is refreshed at most this often (reconnects mostly cost no write). */
 const CONTACT_ROOM_REFRESH_MS = 24 * 60 * 60 * 1000;
+/** Bound on the in-memory write log (an evicted room only costs one extra write on reconnect). */
+const CONTACT_ROOM_WRITES_MAX = 5000;
+/** Durable Object storage deletes at most 128 keys per call. */
+const STORAGE_DELETE_BATCH = 128;
+/** Rooms whose contact disconnect failed, retried by the alarm (see retryPendingDisconnects). */
+const PENDING_DISCONNECT_KEY = "pendingDisconnect";
+const DISCONNECT_RETRY_ATTEMPTS = 5;
+const DISCONNECT_RETRY_BASE_MS = 5_000;
 /** Parallel room RPCs when disconnecting contacts. */
 const DISCONNECT_BATCH = 50;
+
+interface PendingDisconnect {
+  minEpoch: number;
+  rooms: string[];
+  attempt: number;
+}
 
 export class WorkspaceInbox extends DurableObject<Env> {
   /** When this instance last wrote each room's key (avoids a storage write per reconnect). */
@@ -55,16 +69,66 @@ export class WorkspaceInbox extends DurableObject<Env> {
   async trackContactRoom(conversationId: string): Promise<void> {
     const now = Date.now();
     if (now - (this.contactRoomWrites.get(conversationId) ?? 0) < CONTACT_ROOM_REFRESH_MS) return;
-    this.contactRoomWrites.set(conversationId, now);
     await this.ctx.storage.put(CONTACT_ROOM_PREFIX + conversationId, now);
+    // Only after the write succeeded (a failed put must be retried on the next connect), and
+    // delete-then-set keeps insertion order = recency, so the oldest entry is evicted first.
+    this.contactRoomWrites.delete(conversationId);
+    this.contactRoomWrites.set(conversationId, now);
+    if (this.contactRoomWrites.size > CONTACT_ROOM_WRITES_MAX) this.contactRoomWrites.delete(this.contactRoomWrites.keys().next().value!);
   }
 
   /**
    * RPC: close contact sockets authorized before `minEpoch` in every tracked room (the identity
    * secret was rotated, which revokes those tokens). Clients get a new session and reconnect.
-   * Rooms that couldn't be reached stay tracked, so a later call retries them.
+   * Rooms that couldn't be reached are retried by the alarm with backoff.
    */
   async disconnectContacts(minEpoch: number): Promise<void> {
+    const failed = await this.disconnectTrackedRooms(minEpoch);
+    if (failed.length > 0) await this.scheduleDisconnectRetry(minEpoch, failed, 1);
+  }
+
+  /** Alarm: retries rooms whose contact disconnect failed, with backoff, then gives up (logged). */
+  override async alarm(): Promise<void> {
+    const pending = await this.ctx.storage.get<PendingDisconnect>(PENDING_DISCONNECT_KEY);
+    if (!pending) return;
+    const failed = await this.disconnectRooms(pending.rooms, pending.minEpoch);
+    await this.ctx.storage.delete(PENDING_DISCONNECT_KEY);
+    if (failed.length === 0) return;
+    if (pending.attempt >= DISCONNECT_RETRY_ATTEMPTS) {
+      console.error({ msg: "disconnectContacts gave up on rooms", rooms: failed.slice(0, 50), failed: failed.length, minEpoch: pending.minEpoch });
+      return;
+    }
+    await this.scheduleDisconnectRetry(pending.minEpoch, failed, pending.attempt + 1);
+  }
+
+  private async scheduleDisconnectRetry(minEpoch: number, rooms: string[], attempt: number): Promise<void> {
+    // Merge with a retry that's already queued (e.g. an earlier rotation): the newest epoch
+    // closes everything older too.
+    const queued = await this.ctx.storage.get<PendingDisconnect>(PENDING_DISCONNECT_KEY);
+    const merged: PendingDisconnect = {
+      minEpoch: Math.max(minEpoch, queued?.minEpoch ?? 0),
+      rooms: [...new Set([...(queued?.rooms ?? []), ...rooms])],
+      attempt: queued ? Math.min(queued.attempt, attempt) : attempt,
+    };
+    await this.ctx.storage.put(PENDING_DISCONNECT_KEY, merged);
+    const delay = DISCONNECT_RETRY_BASE_MS * 2 ** (merged.attempt - 1);
+    await this.ctx.storage.setAlarm(Date.now() + delay + Math.random() * delay * 0.2);
+  }
+
+  /** Closes stale-epoch contact sockets in `rooms`; returns the rooms that couldn't be reached. */
+  private async disconnectRooms(rooms: string[], minEpoch: number): Promise<string[]> {
+    const failed: string[] = [];
+    for (let i = 0; i < rooms.length; i += DISCONNECT_BATCH) {
+      const batch = rooms.slice(i, i + DISCONNECT_BATCH);
+      const results = await Promise.allSettled(batch.map((id) => roomStub(this.env, id).disconnectContacts(minEpoch)));
+      results.forEach((r, j) => {
+        if (r.status === "rejected") failed.push(batch[j]!);
+      });
+    }
+    return failed;
+  }
+
+  private async disconnectTrackedRooms(minEpoch: number): Promise<string[]> {
     const cutoff = Date.now() - CONTACT_ROOM_TTL_MS;
     const failed: string[] = [];
     let total = 0;
@@ -75,18 +139,19 @@ export class WorkspaceInbox extends DurableObject<Env> {
       const stale: string[] = [];
       const live: string[] = [];
       for (const [key, seenAt] of page) (seenAt < cutoff ? stale : live).push(key);
-      for (let i = 0; i < live.length; i += DISCONNECT_BATCH) {
-        const keys = live.slice(i, i + DISCONNECT_BATCH);
-        const results = await Promise.allSettled(keys.map((k) => roomStub(this.env, k.slice(CONTACT_ROOM_PREFIX.length)).disconnectContacts(minEpoch)));
-        results.forEach((r, j) => {
-          if (r.status === "rejected") failed.push(keys[j]!.slice(CONTACT_ROOM_PREFIX.length));
-        });
-      }
+      failed.push(...(await this.disconnectRooms(live.map((k) => k.slice(CONTACT_ROOM_PREFIX.length)), minEpoch)));
       total += live.length;
-      if (stale.length > 0) await this.ctx.storage.delete(stale);
+      // Pruning must never stop the disconnect pass over later pages.
+      for (let i = 0; i < stale.length; i += STORAGE_DELETE_BATCH) {
+        await this.ctx.storage
+          .delete(stale.slice(i, i + STORAGE_DELETE_BATCH))
+          .catch((e) => console.error({ msg: "contact room prune failed", error: String(e) }));
+      }
+      for (const key of stale) this.contactRoomWrites.delete(key.slice(CONTACT_ROOM_PREFIX.length));
       startAfter = [...page.keys()].at(-1);
     }
-    if (failed.length > 0) console.error({ msg: "disconnectContacts failed for rooms", rooms: failed.slice(0, 50), failed: failed.length, total });
+    if (failed.length > 0) console.error({ msg: "disconnectContacts failed for rooms (will retry)", rooms: failed.slice(0, 50), failed: failed.length, total });
+    return failed;
   }
 
   /**

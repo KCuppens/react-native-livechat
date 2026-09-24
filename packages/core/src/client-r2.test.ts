@@ -199,4 +199,19 @@ describe("client round 2 regressions", () => {
     expect(server.calls.filter((c) => c.method === "GET" && c.path === "/v1/conversations/cv_1").length).toBe(1);
     expect(client.state.threads.cv_1?.loaded).toBe(true);
   });
+
+  it("a retryLoad during an in-flight load resolves only after its own follow-up load", async () => {
+    let calls = 0;
+    const server = routes({
+      // First load sees nothing; any later load sees the new message.
+      "GET /v1/conversations/cv_1/messages": () => ({
+        body: { items: calls++ === 0 ? [] : [message({ id: "msg_late", conversationId: "cv_1" })], nextCursor: null },
+      }),
+    });
+    const client = makeClient(server);
+    await client.init();
+    client.openConversation("cv_1"); // initial load in flight
+    await client.retryLoad("cv_1"); // coalesced: must wait for the follow-up
+    expect(client.state.threads.cv_1?.messages.map((m) => m.id)).toContain("msg_late");
+  });
 });

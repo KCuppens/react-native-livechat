@@ -1,4 +1,3 @@
-import { ApiException } from "../lib/errors";
 import type { Agent, AgentMe, AgentRole } from "@kobecuppens/livechat-protocol";
 import type { Env } from "../env";
 import { randomToken, sha256Hex } from "../lib/crypto";
@@ -47,9 +46,9 @@ export async function ensureAgent(db: D1Database, email: string, name?: string):
  * Emails a sign-in link if the address belongs to an agent or super admin. Callers must
  * respond identically either way so the endpoint doesn't reveal who has an account.
  */
-export async function sendMagicLink(env: Env, email: string, reason: "login" | "invite", workspaceName?: string) {
+export async function sendMagicLink(env: Env, email: string, reason: "login" | "invite", workspaceName?: string): Promise<boolean> {
   const known = (await getAgentByEmail(env.DB, email)) ?? (isSuperAdmin(env, email) ? await ensureAgent(env.DB, email) : null);
-  if (!known) return;
+  if (!known) return false;
 
   // Per-recipient cap (the route limit is per IP, which rotating IPs bypass), so nobody can flood
   // an address or burn email quota. Only unused links count: someone who actually signs in can
@@ -65,12 +64,9 @@ export async function sendMagicLink(env: Env, email: string, reason: "login" | "
     .run();
   if (inserted.meta.changes === 0) {
     console.warn({ msg: "magic link cap reached", reason });
-    // Login: silent, so the response doesn't reveal accounts. Invite: the admin is authenticated
-    // and must not think an email went out.
-    if (reason === "invite") {
-      throw new ApiException(429, "invite_rate_limited", "They're added, but this address was emailed several times recently. Try resending in a few minutes.");
-    }
-    return;
+    // Returns false: the login route stays silent (no account enumeration); the invite route
+    // tells the admin the email was not sent.
+    return false;
   }
   // Token lives in the fragment so it never reaches server logs or Referer headers.
   const url = `${env.PUBLIC_URL}/login/verify#token=${token}`;
@@ -97,6 +93,7 @@ export async function sendMagicLink(env: Env, email: string, reason: "login" | "
     await forget();
     throw err;
   });
+  return true;
 }
 
 /** Consumes a magic link and returns a new session token, or null if invalid/expired/used. */

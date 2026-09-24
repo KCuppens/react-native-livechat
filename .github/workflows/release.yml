@@ -35,7 +35,7 @@ jobs:
         id: tip
         run: |
           if [ "$(git ls-remote origin refs/heads/main | cut -f1)" != "${{ github.event.workflow_run.head_sha }}" ]; then
-            echo "Newer commits on main; skipping this release run."
+            echo "::notice title=Release skipped::${{ github.event.workflow_run.head_sha }} is no longer the tip of main; the tip's own CI run releases and deploys it."
             echo "stale=true" >> "$GITHUB_OUTPUT"
           fi
       - run: pnpm install --frozen-lockfile

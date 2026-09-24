@@ -80,7 +80,9 @@ function CsatCard({ score, onSubmit }: { score: number | null; onSubmit: (score:
           const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
           if (!step) return;
           e.preventDefault();
-          const next = ((((selected ?? (step > 0 ? 0 : 1)) - 1 + step) % 5) + 5) % 5 + 1;
+          const n = CSAT_FACES.length;
+          const current = selected ?? (step > 0 ? n : 1); // from nothing: Right → first, Left → last
+          const next = ((current - 1 + step + n) % n) + 1;
           setSelected(next);
           (e.currentTarget.children[next - 1] as HTMLElement | undefined)?.focus();
         }}
@@ -281,7 +283,7 @@ export function ChatScreen({ conversationId }: { conversationId: string | null }
     const p = prevEnds.current;
     if (p.first && first !== p.first && lastMsg?.id === p.last) {
       el.scrollTop += el.scrollHeight - p.height;
-    } else if (lastMsg?.id !== p.last ? stickToBottom.current || lastMsg?.authorType === "contact" : stickToBottom.current) {
+    } else if (stickToBottom.current || (lastMsg?.id !== p.last && lastMsg?.authorType === "contact")) {
       el.scrollTop = el.scrollHeight;
     }
     prevEnds.current = { first, last: lastMsg?.id, height: el.scrollHeight };

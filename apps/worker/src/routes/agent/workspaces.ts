@@ -44,8 +44,10 @@ export const workspaceRoutes = new Hono<AppBindings>()
     const agent = await ensureAgent(c.env.DB, body.email.trim(), body.name);
     await addMember(c.env.DB, workspaceId, agent.id, body.role);
     const ws = await c.env.DB.prepare("SELECT name FROM workspaces WHERE id = ?").bind(workspaceId).first<{ name: string }>();
-    await sendMagicLink(c.env, agent.email, "invite", ws?.name);
-    return c.json({ ...toAgent(agent), role: body.role }, 201);
+    // The member is added either way; the email is skipped if this address was mailed several
+    // times recently (per-address cap), and the dashboard says so.
+    const inviteEmailSent = await sendMagicLink(c.env, agent.email, "invite", ws?.name);
+    return c.json({ ...toAgent(agent), role: body.role, inviteEmailSent }, 201);
   })
 
   .delete("/:workspaceId/members/:agentId", requireMember("admin"), async (c) => {

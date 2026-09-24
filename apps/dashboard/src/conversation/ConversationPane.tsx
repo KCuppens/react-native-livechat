@@ -177,27 +177,29 @@ export const ConversationPane = memo(function ConversationPane({
 const ThreadMessages = memo(function ThreadMessages({ messages, contact, seenId }: { messages: Message[]; contact: string; seenId?: string }) {
   return (
     <>
-      {messages.map((m) =>
-        m.authorType === "system" ? (
-          <div key={m.id} className="sys">
-            {SYSTEM_TEXT[m.systemEvent ?? ""]?.(m) ?? m.systemEvent}
-          </div>
-        ) : (
-          <div key={m.id} className={`msg ${m.authorType}`}>
-            {m.body && (
-              <div className="msg-bubble">
-                <Markdown source={m.body} />
-              </div>
-            )}
-            <MessageAttachments items={m.attachments} />
-            <div className="msg-meta">
-              {m.authorType === "agent" ? m.author?.name : contact} · {timeFormat.format(m.createdAt)}
-              {m.id === seenId && " · Seen"}
-            </div>
-          </div>
-        ),
-      )}
+      {messages.map((m) => (
+        <ThreadMessage key={m.id} m={m} contact={contact} seen={m.id === seenId} />
+      ))}
     </>
+  );
+});
+
+/** Per row too: merged messages keep their identity, so a new message renders one row, not all. */
+const ThreadMessage = memo(function ThreadMessage({ m, contact, seen }: { m: Message; contact: string; seen: boolean }) {
+  if (m.authorType === "system") return <div className="sys">{SYSTEM_TEXT[m.systemEvent ?? ""]?.(m) ?? m.systemEvent}</div>;
+  return (
+    <div className={`msg ${m.authorType}`}>
+      {m.body && (
+        <div className="msg-bubble">
+          <Markdown source={m.body} />
+        </div>
+      )}
+      <MessageAttachments items={m.attachments} />
+      <div className="msg-meta">
+        {m.authorType === "agent" ? m.author?.name : contact} · {timeFormat.format(m.createdAt)}
+        {seen && " · Seen"}
+      </div>
+    </div>
   );
 });
 

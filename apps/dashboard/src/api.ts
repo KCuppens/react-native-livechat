@@ -73,7 +73,8 @@ export const api = {
     request<{ id: string; publishableKey: string; identitySecret: string }>("POST", "/agent/workspaces", body),
 
   members: (ws: string) => request<Member[]>("GET", `/agent/workspaces/${ws}/members`),
-  invite: (ws: string, body: { email: string; name?: string; role: "admin" | "agent" }) => request<Member>("POST", `/agent/workspaces/${ws}/members`, body),
+  invite: (ws: string, body: { email: string; name?: string; role: "admin" | "agent" }) =>
+    request<Member & { inviteEmailSent: boolean }>("POST", `/agent/workspaces/${ws}/members`, body),
   removeMember: (ws: string, agentId: string) => request<void>("DELETE", `/agent/workspaces/${ws}/members/${agentId}`),
 
   inbox: (ws: string, filter: InboxFilter) => {

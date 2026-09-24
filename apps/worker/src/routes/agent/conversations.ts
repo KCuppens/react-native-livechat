@@ -86,6 +86,19 @@ export const agentConversationRoutes = new Hono<AppBindings>()
       throw err;
     }
     const { message, created, extraResults } = inserted;
+    // A concurrent request with the same clientId saved the reply first: our reopen either gets
+    // undone (nothing happened after it) or is announced, since that request didn't see it.
+    if (!created && reopenedNotice) {
+      await afterResponse(c, async () => {
+        const undone = await undoReopen(c.env.DB, row.id, reopenedNotice.id).catch(() => false);
+        if (undone) return;
+        await bestEffort("realtime", async () => {
+          await publishToConversation(c.env, row.id, { type: "message.created", message: reopenedNotice });
+          await publishToConversation(c.env, row.id, { type: "status.changed", status: "open", assigneeId: row.assignee_id ?? agent.id });
+        });
+        await bestEffort("inbox update", () => conversationChanged(c.env, workspaceId, row.id));
+      });
+    }
     if (created) {
       // Publish what's stored, not what was read before the insert: another agent may have
       // assigned it or a concurrent reply may have reopened it meanwhile.
@@ -176,6 +189,18 @@ export const agentConversationRoutes = new Hono<AppBindings>()
             ...systemMessages.slice(firstNotice).map((m) => c.env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(m.id)),
             c.env.DB.prepare(LAST_MESSAGE_RESYNC_SQL).bind(row.id),
           ]).catch((e) => console.error({ msg: "status revert failed", conversationId: row.id, error: String(e) }));
+          // An assignment made earlier in this request is committed: announce it anyway (a
+          // retry sees it already applied and wouldn't).
+          const assigned = systemMessages.slice(0, firstNotice);
+          if (body.assigneeId !== undefined && body.assigneeId !== row.assignee_id) {
+            await afterResponse(c, async () => {
+              await bestEffort("realtime", async () => {
+                for (const message of assigned) await publishToConversation(c.env, row.id, { type: "message.created", message });
+                await publishToConversation(c.env, row.id, { type: "status.changed", status: row.status, assigneeId: body.assigneeId ?? null });
+              });
+              await bestEffort("inbox update", () => conversationChanged(c.env, workspaceId, row.id));
+            });
+          }
           throw err;
         }
       } else {

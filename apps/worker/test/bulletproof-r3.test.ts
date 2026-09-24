@@ -1,4 +1,5 @@
-import { env } from "cloudflare:test";
+import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { inboxStub } from "../src/realtime/publish";
 import type { Conversation, Message, SessionResponse } from "@kobecuppens/livechat-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as conversations from "../src/services/conversations";
@@ -35,7 +36,9 @@ describe("bulletproof round 3 approved fixes", () => {
       token: contactToken,
       body: json({ clientId: "client-0005", body: "photo", attachmentIds: [att] }),
     });
-    expect(res.status).toBe(400);
+    // Retryable: the claim clears up by itself once it's old enough (or its send finishes).
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { code: "attachment_busy" } });
 
     const started = Date.now();
     const bad = await publicCall(`/v1/conversations/${conversationId}/messages`, {
@@ -72,13 +75,13 @@ describe("bulletproof round 3 approved fixes", () => {
     expect(closed).toBe(true);
   });
 
-  it("tells the admin when an invite hits the per-address cap", async () => {
+  it("tells the admin when an invite email hits the per-address cap (the member is still added)", async () => {
     const { admin, ws } = await setupAgentWorkspace();
     const invite = () => admin.call(`/agent/workspaces/${ws.id}/members`, { method: "POST", body: json({ email: "sam@acme.com", role: "agent" }) });
-    for (let i = 0; i < 3; i++) expect((await invite()).status).toBe(201);
+    for (let i = 0; i < 3; i++) expect(await (await invite()).json()).toMatchObject({ inviteEmailSent: true });
     const capped = await invite();
-    expect(capped.status).toBe(429);
-    expect(await capped.json()).toMatchObject({ error: { code: "invite_rate_limited" } });
+    expect(capped.status).toBe(201);
+    expect(await capped.json()).toMatchObject({ email: "sam@acme.com", inviteEmailSent: false });
   });
 
   it("keeps a reopen (and announces it) when the contact wrote after it and the reply then failed", async () => {
@@ -97,5 +100,23 @@ describe("bulletproof round 3 approved fixes", () => {
     expect(row?.status).toBe("open");
     const msgs = (await (await publicCall(`/v1/conversations/${conversationId}/messages`, { token: contactToken })).json()) as { items: Message[] };
     expect(msgs.items.map((m) => m.systemEvent ?? m.body).slice(-2)).toEqual(["reopened", "still there?"]);
+  });
+
+  it("retries a failed room disconnect from the inbox alarm", async () => {
+    const { ws, publicCall, contactToken, conversationId } = await withConversation();
+    const sock = (await publicCall(`/v1/conversations/${conversationId}/ws?token=${contactToken}`, { headers: { Upgrade: "websocket" } })).webSocket!;
+    sock.accept();
+    const closed = new Promise<number>((resolve) => sock.addEventListener("close", (e) => resolve(e.code)));
+    const inbox = inboxStub(env, ws.id);
+    // As left behind by a rotation whose RPC to this room failed.
+    await runInDurableObject(inbox, async (_obj, state) => {
+      await state.storage.put("pendingDisconnect", { minEpoch: 99, rooms: [conversationId], attempt: 1 });
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    expect(await runDurableObjectAlarm(inbox)).toBe(true);
+    expect(await closed).toBe(4401);
+    await runInDurableObject(inbox, async (_obj, state) => {
+      expect(await state.storage.get("pendingDisconnect")).toBeUndefined();
+    });
   });
 });

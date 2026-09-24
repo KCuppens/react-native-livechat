@@ -10,6 +10,8 @@ import { contactName } from "../conversation/format";
 
 type AssigneeFilter = "all" | "me" | "unassigned";
 
+const NOTIFY_DISMISSED_KEY = "lc-notify-dismissed";
+
 function matchesFilter(c: AgentConversation, status: ConversationStatus, assignee: AssigneeFilter, meId: string) {
   if (c.status !== status) return false;
   if (assignee === "me") return c.assignee?.id === meId;
@@ -86,6 +88,13 @@ export function InboxPage({
 
   // Browsers ignore (or quietly block) permission prompts that aren't from a click, so ask from a button.
   const [notifyPermission, setNotifyPermission] = useState(() => (typeof Notification === "undefined" ? "unsupported" : Notification.permission));
+  const [notifyDismissed, setNotifyDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(NOTIFY_DISMISSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [liveStopped, setLiveStopped] = useState(false);
 
   // Live inbox: upsert/remove conversations as they change.
@@ -151,16 +160,32 @@ export function InboxPage({
             </button>
           </div>
         )}
-        {notifyPermission === "default" && (
+        {notifyPermission === "default" && !notifyDismissed && (
           <div className="live-banner">
             Get a desktop alert for new messages.
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => void Notification.requestPermission().then(setNotifyPermission, () => {})}
-            >
-              Enable notifications
-            </button>
+            <span className="row">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => void Notification.requestPermission().then(setNotifyPermission, () => {})}
+              >
+                Enable notifications
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={() => {
+                  setNotifyDismissed(true);
+                  try {
+                    localStorage.setItem(NOTIFY_DISMISSED_KEY, "1");
+                  } catch {
+                    // Storage blocked: hidden for this visit only.
+                  }
+                }}
+              >
+                Not now
+              </button>
+            </span>
           </div>
         )}
         <div className="inbox-filters">

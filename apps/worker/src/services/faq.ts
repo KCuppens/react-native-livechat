@@ -183,12 +183,18 @@ export async function getArticleBySlug(db: D1Database, ws: WorkspaceRow, slug: s
   // locale IN (every workspace locale) turns this into equality seeks on UNIQUE(workspace_id,
   // locale, slug) instead of scanning the workspace's translations.
   const all = JSON.parse(ws.locales) as string[];
-  const hit = await db
+  let hit = await db
     .prepare(
       `SELECT article_id FROM faq_article_translations
        WHERE workspace_id = ? AND locale IN (${localePlaceholders(all)}) AND slug = ? AND published = 1 ORDER BY locale = ? DESC LIMIT 1`,
     )
     .bind(ws.id, ...all, slug, locales[0])
+    .first<{ article_id: string }>();
+  // A slug from a language that was disabled later: shared links keep working (served in the
+  // best enabled language below). Rare, so the unindexed lookup is only the fallback.
+  hit ??= await db
+    .prepare("SELECT article_id FROM faq_article_translations WHERE workspace_id = ? AND slug = ? AND published = 1 LIMIT 1")
+    .bind(ws.id, slug)
     .first<{ article_id: string }>();
   if (!hit) throw new ApiException(404, "article_not_found", "Article not found");
   const { results } = await db
