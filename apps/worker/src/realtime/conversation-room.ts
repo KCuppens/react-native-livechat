@@ -20,6 +20,8 @@ export function closeSafely(ws: WebSocket, code: number, reason = "closing"): vo
 interface SocketMeta {
   role: ParticipantRole;
   name: string | null;
+  /** Contact sockets: the token epoch they were authorized with (see disconnectContacts). */
+  ep?: number;
 }
 
 /**
@@ -44,7 +46,8 @@ export class ConversationRoom extends DurableObject<Env> {
     const session = request.headers.get("X-Session-Tag");
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [role, ...(agentId ? [`agent:${agentId}`] : []), ...(session ? [session] : [])]);
-    server.serializeAttachment({ role, name: request.headers.get("X-Participant-Name") } satisfies SocketMeta);
+    const ep = Number(request.headers.get("X-Token-Epoch") ?? 0);
+    server.serializeAttachment({ role, name: request.headers.get("X-Participant-Name"), ...(role === "contact" ? { ep } : {}) } satisfies SocketMeta);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -81,9 +84,15 @@ export class ConversationRoom extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets(tag)) closeSafely(ws, CLOSE_ACCESS_REVOKED, "access revoked");
   }
 
-  /** RPC: the workspace's contact tokens were revoked; clients get a new session and reconnect. */
-  disconnectContacts(): void {
-    for (const ws of this.ctx.getWebSockets("contact")) closeSafely(ws, CLOSE_SESSION_REVOKED, "session revoked");
+  /**
+   * RPC: the workspace's contact tokens older than `minEpoch` were revoked. Their sockets close
+   * (clients get a new session and reconnect); sockets on a current token stay.
+   */
+  disconnectContacts(minEpoch: number): void {
+    for (const ws of this.ctx.getWebSockets("contact")) {
+      const meta = ws.deserializeAttachment() as SocketMeta | null;
+      if ((meta?.ep ?? 0) < minEpoch) closeSafely(ws, CLOSE_SESSION_REVOKED, "session revoked");
+    }
   }
 
   /** RPC: push an event to connected participants, optionally only to one role. */

@@ -22,8 +22,8 @@ function Screens({ onClose }: { onClose?: () => void }) {
   const { route } = useMessenger();
   const status = useLiveChatState((s) => s.status);
   const client = useLiveChatClient();
-  if (status === "error") return <ErrorState onRetry={() => void client.init().catch(() => {})} />;
-  if (status !== "ready") return <Loading />;
+  if (status === "error") return <WithHeader onClose={onClose}><ErrorState onRetry={() => void client.init().catch(() => {})} /></WithHeader>;
+  if (status !== "ready") return <WithHeader onClose={onClose}><Loading /></WithHeader>;
   switch (route.name) {
     case "home":
     case "search":
@@ -61,13 +61,16 @@ class SupportErrorBoundary extends Component<{ children: ReactNode; fallback: (r
   }
 }
 
-/** Keeps the header (Back and Close) on a crashed screen, so iOS users aren't stuck on it. */
-function CrashedScreen({ onRetry, onClose }: { onRetry: () => void; onClose?: () => void }) {
+/**
+ * Loading, init-error and crashed screens keep the header (Back and Close): iOS has no hardware
+ * back button, so a bare error would trap the user.
+ */
+function WithHeader({ onClose, children }: { onClose?: () => void; children: ReactNode }) {
   const t = useTranslate();
   return (
     <>
       <Header title={t("home.title")} onClose={onClose} />
-      <ErrorState onRetry={onRetry} />
+      {children}
     </>
   );
 }
@@ -92,7 +95,11 @@ function Body({ onClose, insets, keyboardVerticalOffset }: SupportScreenProps) {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={keyboardVerticalOffset}>
       <View style={{ flex: 1, paddingTop: insets?.top ?? 0, paddingBottom: insets?.bottom ?? 0 }}>
         {/* Keyed by route: navigating away (Back) resets it. */}
-        <SupportErrorBoundary key={JSON.stringify(messenger.route)} fallback={(reset) => <CrashedScreen onRetry={reset} onClose={onClose} />}>
+        <SupportErrorBoundary key={JSON.stringify(messenger.route)} fallback={(reset) => (
+            <WithHeader onClose={onClose}>
+              <ErrorState onRetry={reset} />
+            </WithHeader>
+          )}>
           <Screens onClose={onClose} />
         </SupportErrorBoundary>
       </View>

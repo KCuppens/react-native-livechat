@@ -3,7 +3,7 @@ import { Markdown } from "@kobecuppens/livechat-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { attempt, Field, Spinner, toast } from "../components/ui";
-import { useRouter } from "../router";
+import { Link, useRouter } from "../router";
 
 const titleOf = (a: AgentFaqArticle, locale: string) =>
   a.translations[locale]?.title ?? Object.values(a.translations)[0]?.title ?? "(untitled)";
@@ -46,7 +46,13 @@ export function FaqPage({ workspaceId, articleId }: { workspaceId: string; artic
   }
   if (articleId) {
     const article = articleId === "new" ? null : articles.find((a) => a.id === articleId);
-    if (articleId !== "new" && !article) return <div className="empty">Article not found</div>;
+    if (articleId !== "new" && !article) {
+      return (
+        <div className="empty">
+          Article not found. <Link to={`/w/${workspaceId}/faq`}>Back to the help center</Link>
+        </div>
+      );
+    }
     return <ArticleEditor key={articleId} workspaceId={workspaceId} article={article ?? null} categories={categories} settings={settings} onSaved={reload} />;
   }
   return <ArticleList workspaceId={workspaceId} articles={articles} categories={categories} settings={settings} onChange={reload} />;
@@ -134,8 +140,11 @@ function ArticleList({
                   {list.map((a) => {
                     const votes = a.helpfulCount + a.unhelpfulCount;
                     return (
+                      // The row click is a mouse shortcut; the title link is the keyboard/screen-reader path.
                       <tr key={a.id} className="clickable" onClick={() => navigate(`/w/${workspaceId}/faq/${a.id}`)}>
-                        <td>{titleOf(a, locale)}</td>
+                        <td>
+                          <Link to={`/w/${workspaceId}/faq/${a.id}`}>{titleOf(a, locale)}</Link>
+                        </td>
                         <td>
                           {settings.locales.map((l) => (
                             <span
@@ -145,6 +154,7 @@ function ArticleList({
                               title={a.translations[l] ? (a.translations[l]!.published ? "Published" : "Draft") : "Missing"}
                             >
                               {l}
+                              <span className="sr-only">: {a.translations[l] ? (a.translations[l]!.published ? "published" : "draft") : "missing"}</span>
                             </span>
                           ))}
                         </td>
@@ -225,12 +235,22 @@ function ArticleEditor({
   const [saving, setSaving] = useState(false);
   const current = draft[locale];
 
+  const [titleError, setTitleError] = useState<string | null>(null);
   const setField = (patch: Partial<FaqTranslationInput>) => {
+    if (patch.title?.trim()) setTitleError(null);
     setRemoved((r) => r.filter((l) => l !== locale));
     setDraft((d) => ({ ...d, [locale]: { title: "", bodyMd: "", published: false, ...d[locale], ...patch } }));
   };
 
   const save = async () => {
+    // A translation that has content (or already exists) but no title would be skipped silently:
+    // stop and point at it instead of saying "Saved".
+    const untitled = Object.entries(draft).find(([l, t]) => !t.title.trim() && !removed.includes(l) && (t.bodyMd.trim() || article?.translations[l]))?.[0];
+    if (untitled) {
+      setLocale(untitled);
+      setTitleError(untitled);
+      return;
+    }
     const translations: Record<string, FaqTranslationInput | null> = {};
     for (const [l, t] of Object.entries(draft)) {
       if (!t.title.trim()) continue;
@@ -297,7 +317,12 @@ function ArticleEditor({
         {settings.locales.map((l) => (
           <button type="button" key={l} role="tab" aria-selected={l === locale} className={l === locale ? "active" : ""} onClick={() => setLocale(l)}>
             {l.toUpperCase()}
-            {draft[l]?.title ? (draft[l]!.published ? " ●" : " ○") : ""}
+            {draft[l]?.title && (
+              <>
+                <span aria-hidden="true">{draft[l]!.published ? " ●" : " ○"}</span>
+                <span className="sr-only">{draft[l]!.published ? " (published)" : " (draft)"}</span>
+              </>
+            )}
           </button>
         ))}
       </div>
@@ -305,7 +330,18 @@ function ArticleEditor({
       <div className="split">
         <div>
           <Field label="Title">
-            <input className="input" value={current?.title ?? ""} onChange={(e) => setField({ title: e.target.value })} placeholder="How do I…?" />
+            <input
+              className="input"
+              value={current?.title ?? ""}
+              onChange={(e) => setField({ title: e.target.value })}
+              placeholder="How do I…?"
+              aria-invalid={titleError === locale}
+            />
+            {titleError === locale && (
+              <div className="error-text" role="alert">
+                Add a title for {locale.toUpperCase()}, or clear its body to leave this language out.
+              </div>
+            )}
           </Field>
           <Field label="URL slug" hint="Leave empty to generate from the title.">
             <input className="input" value={current?.slug ?? ""} onChange={(e) => setField({ slug: e.target.value.toLowerCase() })} placeholder="how-do-i" />

@@ -17,6 +17,7 @@ import {
   unreadCountForContact,
 } from "../../services/conversations";
 import { afterResponse, bestEffort, conversationChanged } from "../../services/events";
+import { refreshWorkspace } from "../../services/workspaces";
 import { presentMessage, presentMessages } from "../../services/attachments";
 import { maybeAutoReply } from "../../services/automation";
 
@@ -43,12 +44,14 @@ export const conversationRoutes = new Hono<AppBindings>()
     const body = await parseJson(c, StartConversationRequest);
 
     const existingId = await findConversationByFirstClientId(c.env.DB, contactId, body.clientId);
-    if (existingId) {
+    const first = existingId && (await getMessageByClientId(c.env.DB, existingId, body.clientId));
+    if (existingId && first) {
       // Retry: answer with the contact's own first message, not whatever came after it.
       const { dto } = await getContactConversation(c.env.DB, contactId, existingId);
-      const first = await getMessageByClientId(c.env.DB, existingId, body.clientId);
-      return c.json({ conversation: dto, message: first && (await presentMessage(c.env, first)) }, 200);
+      return c.json({ conversation: dto, message: await presentMessage(c.env, first) }, 200);
     }
+    // The conversation may exist without its first message (the first attempt died between the
+    // two writes, or is still running): fall through; both steps below are idempotent.
 
     const { id: conversationId, created: newConversation } = await createConversation(c.env.DB, workspaceId, contactId, body.clientId);
     let message: Message;
@@ -170,7 +173,12 @@ export const conversationRoutes = new Hono<AppBindings>()
   .get("/:id/ws", async (c) => {
     if (c.req.header("Upgrade") !== "websocket") throw new ApiException(426, "upgrade_required", "Expected WebSocket upgrade");
     const row = await getContactConversationRow(c.env.DB, c.get("contact").contactId, c.req.param("id"));
-    const headers = new Headers({ Upgrade: "websocket", "X-Participant-Role": "contact" });
+    // Sockets outlive requests, so check the token epoch against the current row, not this
+    // isolate's cached copy (which may predate a rotation by up to 30s).
+    const contact = c.get("contact");
+    const ws = await refreshWorkspace(c.env.DB, c.get("workspace"));
+    if (contact.epoch !== ws.contact_token_epoch) throw new ApiException(401, "invalid_token", "Session token is invalid or expired");
+    const headers = new Headers({ Upgrade: "websocket", "X-Participant-Role": "contact", "X-Token-Epoch": String(contact.epoch) });
     const res = await roomStub(c.env, row.id).fetch(new Request("https://room/ws", { headers }));
     // So rotating the identity secret can find and close this socket (its token is revoked then).
     if (res.status === 101) await afterResponse(c, () => bestEffort("track contact room", () => inboxStub(c.env, row.workspace_id).trackContactRoom(row.id)));

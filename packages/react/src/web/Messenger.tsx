@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useInsertionEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { useLiveChatClient, useLiveChatState, useMessenger, useTranslate, useUnreadCount } from "../hooks/context";
 import { useWorkspaceConfig } from "../hooks/data";
 import { ChatIcon, CloseIcon } from "./icons";
@@ -6,7 +6,7 @@ import { ArticleScreen, CategoryScreen } from "./screens/Articles";
 import { ChatScreen } from "./screens/Chat";
 import { ConversationsScreen } from "./screens/Conversations";
 import { HomeScreen } from "./screens/Home";
-import { ErrorState, InlineContext, Loading, MessengerErrorBoundary } from "./screens/shared";
+import { ErrorState, Header, InlineContext, Loading, MessengerErrorBoundary } from "./screens/shared";
 import { injectStyles } from "./styles";
 import { onColor } from "./util";
 
@@ -24,7 +24,8 @@ function useThemeStyle(primaryColor?: string): CSSProperties {
 }
 
 function useStyles(styleRoot?: Document | ShadowRoot) {
-  useEffect(() => {
+  // Before paint: with useEffect the first frame (e.g. the launcher) renders unstyled and jumps.
+  useInsertionEffect(() => {
     if (typeof document !== "undefined") injectStyles(styleRoot ?? document);
   }, [styleRoot]);
 }
@@ -36,12 +37,24 @@ function deepActiveElement(): HTMLElement | null {
   return el;
 }
 
+/** Loading/error/crash states keep a header, so Back and Close stay reachable (no Escape key on phones). */
+function WithHeader({ children }: { children: ReactNode }) {
+  const t = useTranslate();
+  return (
+    <>
+      {/* Not a focus target: this header is replaced when loading ends, which would drop focus. */}
+      <Header title={t("home.title")} focusTarget={false} />
+      {children}
+    </>
+  );
+}
+
 function Screens() {
   const { route } = useMessenger();
   const status = useLiveChatState((s) => s.status);
   const client = useLiveChatClient();
-  if (status === "error") return <ErrorState onRetry={() => void client.init().catch(() => {})} />;
-  if (status !== "ready") return <Loading />;
+  if (status === "error") return <WithHeader><ErrorState onRetry={() => void client.init().catch(() => {})} /></WithHeader>;
+  if (status !== "ready") return <WithHeader><Loading /></WithHeader>;
   switch (route.name) {
     case "home":
       return <HomeScreen />;
@@ -143,7 +156,11 @@ export function Messenger({ inline, primaryColor, theme, className, styleRoot }:
           {/* Keyed by route: navigating away resets it, and Back leaves a screen that keeps failing. */}
           <MessengerErrorBoundary
             key={JSON.stringify(messenger.route)}
-            fallback={(reset) => <ErrorState onRetry={reset} onBack={messenger.canGoBack ? messenger.back : undefined} />}
+            fallback={(reset) => (
+              <WithHeader>
+                <ErrorState onRetry={reset} />
+              </WithHeader>
+            )}
           >
             <Screens />
           </MessengerErrorBoundary>
@@ -174,7 +191,7 @@ export function Launcher({ primaryColor, theme, styleRoot }: ThemeProps & { styl
   return (
     <div className="lc-root" data-theme={theme} style={style}>
       <button type="button"
-        className="lc-launcher"
+        className={`lc-launcher${messenger.isOpen ? " lc-open" : ""}`}
         onClick={messenger.toggle}
         // The label replaces the button's content as its name, so the unread count must be in it.
         aria-label={messenger.isOpen ? t("common.close") : unread > 0 ? t("launcher.unread", { title: t("home.title"), count: unread }) : t("home.title")}

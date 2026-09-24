@@ -18,10 +18,6 @@ function matchesFilter(c: AgentConversation, status: ConversationStatus, assigne
 }
 
 
-function refreshSession() {
-  void api.me().catch(() => {});
-}
-
 function notify(title: string, body: string, onClick: () => void) {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const n = new Notification(title, { body, tag: title });
@@ -37,7 +33,7 @@ export function InboxPage({
   workspaceId,
   conversationId,
   onUnread,
-  onAccessLost = refreshSession,
+  onAccessLost,
 }: {
   me: AgentMe;
   workspaceId: string;
@@ -47,7 +43,7 @@ export function InboxPage({
    * A live socket was closed for good (removed from this workspace, or signed out). App reloads
    * `me`, which drops a workspace the agent lost and routes to another one (or to /login).
    */
-  onAccessLost?: () => void;
+  onAccessLost: () => void;
 }) {
   const accessLost = useRef(onAccessLost);
   accessLost.current = onAccessLost;
@@ -86,16 +82,23 @@ export function InboxPage({
 
   useEffect(() => {
     api.members(workspaceId).then(setMembers, () => {});
-    if (typeof Notification !== "undefined" && Notification.permission === "default") void Notification.requestPermission();
   }, [workspaceId]);
+
+  // Browsers ignore (or quietly block) permission prompts that aren't from a click, so ask from a button.
+  const [notifyPermission, setNotifyPermission] = useState(() => (typeof Notification === "undefined" ? "unsupported" : Notification.permission));
+  const [liveStopped, setLiveStopped] = useState(false);
 
   // Live inbox: upsert/remove conversations as they change.
   useEffect(() => {
     const socket = new ReconnectingSocket<InboxEvent>({
       url: async () => api.socketUrl(`/agent/w/${workspaceId}/inbox/ws`),
       onStateChange: () => {},
-      // Access revoked (4003) or session gone: let the auth check route to /login if needed.
-      onTerminalClose: () => accessLost.current(),
+      // Access revoked (4003) or session gone: let the auth check route elsewhere if needed, and
+      // say the list no longer updates live (if access remains, a reload reconnects it).
+      onTerminalClose: () => {
+        setLiveStopped(true);
+        accessLost.current();
+      },
       onReconnect: () => {
         // Backfill page 1 and reset the cursor with it; drop the result if the filter changed meanwhile.
         const f = filterRef.current;
@@ -140,6 +143,26 @@ export function InboxPage({
   return (
     <div className="inbox">
       <section className="inbox-list" aria-label="Conversations">
+        {liveStopped && (
+          <div className="live-banner" role="status">
+            Live updates stopped.
+            <button type="button" className="btn btn-sm" onClick={() => location.reload()}>
+              Reload
+            </button>
+          </div>
+        )}
+        {notifyPermission === "default" && (
+          <div className="live-banner">
+            Get a desktop alert for new messages.
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => void Notification.requestPermission().then(setNotifyPermission, () => {})}
+            >
+              Enable notifications
+            </button>
+          </div>
+        )}
         <div className="inbox-filters">
           <div className="segmented" role="tablist" aria-label="Status">
             {(["open", "pending", "resolved"] as const).map((s) => (

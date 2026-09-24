@@ -149,7 +149,7 @@ function Harness({ onUnread }: { onUnread: (n: number) => void }) {
   const m = match("/w/:ws/inbox/:id?", path);
   return (
     <>
-      <InboxPage me={me} workspaceId="ws_1" conversationId={m?.id ?? null} onUnread={onUnread} />
+      <InboxPage me={me} workspaceId="ws_1" conversationId={m?.id ?? null} onUnread={onUnread} onAccessLost={() => {}} />
       <Toaster />
     </>
   );
@@ -403,12 +403,16 @@ describe("InboxPage conversation list", () => {
     expect(FakeNotification.instances).toHaveLength(0);
   });
 
-  it("requests notification permission when it hasn't been decided yet", async () => {
+  it("asks for notification permission from a button, not on load", async () => {
     FakeNotification.permission = "default";
     stubApi(baseRoutes());
     renderInbox();
     await screen.findByText("No open conversations 🎉");
+    // Browsers ignore or quietly block prompts that don't come from a user gesture.
+    expect(FakeNotification.requestPermission).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Enable notifications" }));
     expect(FakeNotification.requestPermission).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Enable notifications" })).toBeNull());
   });
 
   it("reports the unread count for the open/all view and mirrors it in the page title", async () => {

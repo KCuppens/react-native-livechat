@@ -23,6 +23,7 @@ export const en = {
   "chat.placeholder": "Write a message…",
   "chat.send": "Send",
   "chat.attach": "Attach a file",
+  "chat.removeAttachment": "Remove {name}",
   "chat.suggestedArticles": "These articles might help",
   "chat.typing": "{name} is typing…",
   "chat.someoneTyping": "Typing…",

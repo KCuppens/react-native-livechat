@@ -88,14 +88,16 @@ export const settingsRoutes = new Hono<AppBindings>()
     const secret = `sk_id_${randomToken(24)}`;
     // Bumping the epoch also revokes every contact token issued so far (the SDKs re-create
     // sessions transparently on 401 invalid_token; verified users need the new hash).
-    await c.env.DB.prepare("UPDATE workspaces SET identity_secret_enc = ?, contact_token_epoch = contact_token_epoch + 1 WHERE id = ?")
-      .bind(await encryptString(c.env.ENCRYPTION_KEY, secret), c.get("membership").workspaceId)
-      .run();
     const workspaceId = c.get("membership").workspaceId;
+    const { contact_token_epoch: epoch } = (await c.env.DB.prepare(
+      "UPDATE workspaces SET identity_secret_enc = ?, contact_token_epoch = contact_token_epoch + 1 WHERE id = ? RETURNING contact_token_epoch",
+    )
+      .bind(await encryptString(c.env.ENCRYPTION_KEY, secret), workspaceId)
+      .first<{ contact_token_epoch: number }>())!;
     invalidateWorkspace(workspaceId);
     // Open contact sockets were authorized with now-revoked tokens: close them (they reconnect
-    // with a new session).
-    await afterResponse(c, () => bestEffort("disconnect contacts", () => inboxStub(c.env, workspaceId).disconnectContacts()));
+    // with a new session). Sockets already on the new epoch stay.
+    await afterResponse(c, () => bestEffort("disconnect contacts", () => inboxStub(c.env, workspaceId).disconnectContacts(epoch)));
     return c.json({ identitySecret: secret });
   })
 

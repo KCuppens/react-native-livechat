@@ -180,9 +180,15 @@ export async function searchArticles(
 export async function getArticleBySlug(db: D1Database, ws: WorkspaceRow, slug: string, locale?: string): Promise<FaqArticle> {
   const locales = contentLocales(ws, locale);
   // The slug may belong to any locale (shared links); then serve the best available translation.
+  // locale IN (every workspace locale) turns this into equality seeks on UNIQUE(workspace_id,
+  // locale, slug) instead of scanning the workspace's translations.
+  const all = JSON.parse(ws.locales) as string[];
   const hit = await db
-    .prepare("SELECT article_id FROM faq_article_translations WHERE workspace_id = ? AND slug = ? AND published = 1 ORDER BY locale = ? DESC LIMIT 1")
-    .bind(ws.id, slug, locales[0])
+    .prepare(
+      `SELECT article_id FROM faq_article_translations
+       WHERE workspace_id = ? AND locale IN (${localePlaceholders(all)}) AND slug = ? AND published = 1 ORDER BY locale = ? DESC LIMIT 1`,
+    )
+    .bind(ws.id, ...all, slug, locales[0])
     .first<{ article_id: string }>();
   if (!hit) throw new ApiException(404, "article_not_found", "Article not found");
   const { results } = await db

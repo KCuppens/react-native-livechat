@@ -237,6 +237,9 @@ export async function unreadCountForContact(db: D1Database, contactId: string): 
  * uploader, be in the same workspace and not be on another message. The UPDATE's own
  * `message_id IS NULL` guard makes two concurrent sends unable to claim the same file.
  */
+/** How old an unsaved message's claim must be before another attempt may take its files. */
+const ORPHAN_CLAIM_AGE_MS = 30_000;
+
 async function claimAttachments(
   db: D1Database,
   messageId: string,
@@ -249,15 +252,19 @@ async function claimAttachments(
   if (unique.length === 0) return [];
   const placeholders = unique.map(() => "?").join(",");
   // An orphan is a claim for a message that was never saved (the isolate died between claim and
-  // insert, or the release failed). Only taken over once a clientId retry proved nobody else holds it.
-  const free = reclaimOrphans ? "(message_id IS NULL OR message_id NOT IN (SELECT id FROM messages))" : "message_id IS NULL";
+  // insert, or the release failed). Only taken over once it's clearly abandoned: a younger claim
+  // may belong to a send that is still in flight (e.g. a double-tapped send with the same files).
+  const now = Date.now();
+  const free = reclaimOrphans
+    ? "(message_id IS NULL OR (message_id NOT IN (SELECT id FROM messages) AND (claimed_at IS NULL OR claimed_at < ?)))"
+    : "message_id IS NULL";
   const { results } = await db
     .prepare(
-      `UPDATE attachments SET message_id = ?
+      `UPDATE attachments SET message_id = ?, claimed_at = ?
        WHERE id IN (${placeholders}) AND workspace_id = ? AND uploader_type = ? AND uploader_id = ? AND ${free}
        RETURNING id, name, content_type, size, width, height`,
     )
-    .bind(messageId, ...unique, workspaceId, uploader.type, uploader.id)
+    .bind(messageId, now, ...unique, workspaceId, uploader.type, uploader.id, ...(reclaimOrphans ? [now - ORPHAN_CLAIM_AGE_MS] : []))
     .all<{ id: string; name: string; content_type: string; size: number; width: number | null; height: number | null }>();
   if (results.length !== unique.length) {
     await releaseAttachments(db, messageId, results.map((r) => r.id));
@@ -287,6 +294,16 @@ async function releaseAttachments(db: D1Database, messageId: string, ids: string
     .bind(messageId, ...ids)
     .run()
     .catch((e) => console.error({ msg: "attachment release failed", messageId, error: String(e) }));
+}
+
+/** Re-points claims from one message id to another (never throws, like releaseAttachments). */
+async function moveClaims(db: D1Database, from: string, to: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await db
+    .prepare(`UPDATE attachments SET message_id = ? WHERE message_id = ? AND id IN (${ids.map(() => "?").join(",")})`)
+    .bind(to, from, ...ids)
+    .run()
+    .catch((e) => console.error({ msg: "attachment claim move failed", from, to, error: String(e) }));
 }
 
 const RETRY_LOOKUP_DELAYS_MS = [100, 250, 500];
@@ -341,8 +358,15 @@ export async function insertMessage(
       attachments = await claimAttachments(db, id, input.workspaceId, uploader, input.attachmentIds ?? []);
     } catch (err) {
       if (!input.clientId || !(err instanceof ApiException)) throw err;
-      // A concurrent request with the same clientId may hold the files and still be inserting:
-      // give it a moment, and answer with its message instead of "invalid attachment".
+      // Only worth waiting for if one of our files is claimed by someone (otherwise the ids are
+      // simply invalid): a concurrent request with the same clientId may hold them and still be
+      // inserting. Then answer with its message instead of "invalid attachment".
+      const ids = [...new Set(input.attachmentIds ?? [])];
+      const held = await db
+        .prepare(`SELECT 1 FROM attachments WHERE id IN (${ids.map(() => "?").join(",")}) AND uploader_type = ? AND uploader_id = ? AND message_id IS NOT NULL LIMIT 1`)
+        .bind(...ids, uploader.type, uploader.id)
+        .first();
+      if (!held) throw err;
       for (const delay of RETRY_LOOKUP_DELAYS_MS) {
         await new Promise((r) => setTimeout(r, delay));
         const existing = await getMessageByClientId(db, input.conversationId, input.clientId);
@@ -382,12 +406,18 @@ export async function insertMessage(
   try {
     results = await db.batch(statements);
   } catch (err) {
-    await releaseAttachments(db, id, attachments.map((a) => a.id));
+    const claimed = attachments.map((a) => a.id);
     // A parallel retry with the same clientId won the unique index: return its message.
     if (input.clientId && String(err).includes("UNIQUE")) {
       const existing = await getMessageByClientId(db, input.conversationId, input.clientId);
-      if (existing) return { message: existing, created: false, extraResults: [] };
+      if (existing) {
+        // Files we (re)claimed belong to the winner's saved message: hand them over instead of
+        // releasing them, or a saved message would point at unclaimed attachments.
+        await moveClaims(db, id, existing.id, claimed);
+        return { message: existing, created: false, extraResults: [] };
+      }
     }
+    await releaseAttachments(db, id, claimed);
     throw err;
   }
   const row = (results.at(-1) as D1Result<MessageRow>).results[0]!;
@@ -434,6 +464,50 @@ export async function findConversationByFirstClientId(db: D1Database, contactId:
  * Claims the right to ask for a rating: true for exactly one caller per conversation, so two
  * agents resolving at the same instant can't both post a rating request.
  */
+/**
+ * Reopens a resolved conversation and posts the "Reopened" notice. Conditional, so two
+ * concurrent callers can't both reopen it. If the notice can't be saved, the reopen is undone
+ * so a retry can redo both. Returns the notice, or null if it was already reopened.
+ */
+export async function reopenWithNotice(db: D1Database, conversationId: string, workspaceId: string): Promise<Message | null> {
+  const reopened = await db.prepare("UPDATE conversations SET status = 'open' WHERE id = ? AND status = 'resolved' RETURNING id").bind(conversationId).first();
+  if (!reopened) return null;
+  try {
+    const { message } = await insertMessage(db, {
+      conversationId, workspaceId, authorType: "system", authorId: null, clientId: null, body: "", systemEvent: "reopened",
+    });
+    return message;
+  } catch (err) {
+    await db
+      .prepare("UPDATE conversations SET status = 'resolved' WHERE id = ? AND status = 'open'")
+      .bind(conversationId)
+      .run()
+      .catch((e) => console.error({ msg: "reopen revert failed", conversationId, error: String(e) }));
+    throw err;
+  }
+}
+
+/** Points a conversation's preview back at its newest remaining message (after deleting one). */
+export const LAST_MESSAGE_RESYNC_SQL = `UPDATE conversations SET
+  last_message_id = (SELECT MAX(id) FROM messages WHERE conversation_id = ?1),
+  last_message_at = COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = ?1), last_message_at)
+  WHERE id = ?1`;
+
+/**
+ * Undoes reopenWithNotice when the reply it was for couldn't be saved, but only if nothing
+ * happened since (the notice is still the last message and it's still open). Otherwise, e.g.
+ * the contact wrote in between, the reopen stands. Returns whether it was undone.
+ */
+export async function undoReopen(db: D1Database, conversationId: string, noticeId: string): Promise<boolean> {
+  const undone = await db
+    .prepare("UPDATE conversations SET status = 'resolved' WHERE id = ? AND status = 'open' AND last_message_id = ? RETURNING id")
+    .bind(conversationId, noticeId)
+    .first();
+  if (!undone) return false;
+  await db.batch([db.prepare("DELETE FROM messages WHERE id = ?").bind(noticeId), db.prepare(LAST_MESSAGE_RESYNC_SQL).bind(conversationId)]);
+  return true;
+}
+
 export async function claimCsatRequest(db: D1Database, conversationId: string): Promise<boolean> {
   const res = await db
     .prepare("UPDATE conversations SET csat_requested_at = ? WHERE id = ? AND csat_requested_at IS NULL")

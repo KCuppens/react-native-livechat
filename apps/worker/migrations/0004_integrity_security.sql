@@ -15,9 +15,18 @@ CREATE UNIQUE INDEX conversations_first_client ON conversations(contact_id, firs
 
 -- The rating request is claimed with a conditional UPDATE so it's asked at most once (agent2-006).
 ALTER TABLE conversations ADD COLUMN csat_requested_at INTEGER;
+-- Only conversations that can have a rating request (resolved at some point, or rated): the
+-- correlated scan reads every message of each conversation it visits.
 UPDATE conversations SET csat_requested_at = (
   SELECT MIN(m.created_at) FROM messages m WHERE m.conversation_id = conversations.id AND m.system_event = 'csat_request'
+)
+WHERE status = 'resolved' OR csat_score IS NOT NULL OR EXISTS (
+  SELECT 1 FROM messages r WHERE r.conversation_id = conversations.id AND r.system_event = 'resolved'
 );
+
+-- When an attachment was claimed for a message: a claim for a message that never got saved is
+-- only taken over once it's clearly abandoned (not while that send may still be in flight).
+ALTER TABLE attachments ADD COLUMN claimed_at INTEGER;
 
 -- Contact tokens carry the workspace epoch; bumping it (identity secret rotation) revokes them (agent5-010).
 ALTER TABLE workspaces ADD COLUMN contact_token_epoch INTEGER NOT NULL DEFAULT 0;

@@ -43,6 +43,7 @@ export const app = new Hono<AppBindings>()
       // Update this when adding a migration.
       await c.env.DB.prepare("SELECT contact_token_epoch FROM workspaces LIMIT 1").first();
       await c.env.DB.prepare("SELECT first_client_id, csat_requested_at FROM conversations LIMIT 1").first();
+      await c.env.DB.prepare("SELECT claimed_at FROM attachments LIMIT 1").first();
       return c.json({ ok: true, checks: { d1: { ok: true, ms: Date.now() - started } } });
     } catch (err) {
       console.error({ msg: "health: d1 failed", error: err instanceof Error ? err.message : String(err) });

@@ -88,6 +88,6 @@ export const requireContact = createMiddleware<AppBindings>(async (c, next) => {
   if (!payload || payload.ws !== ws.id || (payload.ep ?? 0) !== ws.contact_token_epoch) {
     throw new ApiException(401, "invalid_token", "Session token is invalid or expired");
   }
-  c.set("contact", { contactId: payload.sub, workspaceId: payload.ws });
+  c.set("contact", { contactId: payload.sub, workspaceId: payload.ws, epoch: payload.ep ?? 0 });
   await next();
 });

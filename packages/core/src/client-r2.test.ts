@@ -185,4 +185,18 @@ describe("client round 2 regressions", () => {
     expect(second.url).toContain("tok_2");
     expect(server.calls.filter((c) => c.path === "/v1/session")).toHaveLength(2);
   });
+
+  it("opening a conversation loads it once, plus a messages-only backfill when the socket subscribes", async () => {
+    const server = routes();
+    const client = makeClient(server);
+    await client.init();
+    client.openConversation("cv_1");
+    await flush(); // the socket is created once its URL (session token) resolves
+    FakeWebSocket.instances[0]!.open();
+    for (let i = 0; i < 6; i++) await flush();
+    const count = (path: string) => server.calls.filter((c) => c.method === "GET" && c.path.startsWith(path)).length;
+    expect(count("/v1/conversations/cv_1/messages")).toBe(2);
+    expect(server.calls.filter((c) => c.method === "GET" && c.path === "/v1/conversations/cv_1").length).toBe(1);
+    expect(client.state.threads.cv_1?.loaded).toBe(true);
+  });
 });

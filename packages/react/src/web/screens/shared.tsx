@@ -6,7 +6,18 @@ import { initials } from "../util";
 /** True when the Messenger is rendered inline (a /help page): there's nothing to close. */
 export const InlineContext = createContext(false);
 
-export function Header({ title, subtitle, avatar }: { title: ReactNode; subtitle?: ReactNode; avatar?: ReactNode }) {
+export function Header({
+  title,
+  subtitle,
+  avatar,
+  focusTarget = true,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  avatar?: ReactNode;
+  /** Whether route changes may move focus to this title. */
+  focusTarget?: boolean;
+}) {
   const messenger = useMessenger();
   const t = useTranslate();
   return (
@@ -19,7 +30,7 @@ export function Header({ title, subtitle, avatar }: { title: ReactNode; subtitle
       {avatar}
       <div className="lc-header-title">
         {/* Focus target after navigation, so keyboard/screen-reader users land on the new screen. */}
-        <strong data-screen-title tabIndex={-1}>
+        <strong data-screen-title={focusTarget || undefined} tabIndex={focusTarget ? -1 : undefined}>
           {title}
         </strong>
         {subtitle && <span>{subtitle}</span>}
@@ -53,15 +64,12 @@ export function Loading() {
   );
 }
 
-export function ErrorState({ onRetry, onBack }: { onRetry?: () => void; onBack?: () => void }) {
+export function ErrorState({ onRetry }: { onRetry?: () => void }) {
   const t = useTranslate();
   return (
     <div className="lc-error-state" role="alert">
       <div>{t("common.error")}</div>
-      <div className="lc-error-actions">
-        {onBack && <button type="button" onClick={onBack}>{t("common.back")}</button>}
-        {onRetry && <button type="button" onClick={onRetry}>{t("common.retry")}</button>}
-      </div>
+      {onRetry && <button type="button" onClick={onRetry}>{t("common.retry")}</button>}
     </div>
   );
 }

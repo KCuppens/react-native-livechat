@@ -41,6 +41,24 @@ export async function attempt(action: () => Promise<unknown>, fallback = "Someth
   }
 }
 
+/**
+ * In-flight state for an action button: `run` ignores clicks while one is pending (no double
+ * submits) and `busy` drives the disabled state and "Saving…" label.
+ */
+export function useBusy(): [boolean, (action: () => Promise<unknown>) => Promise<void>] {
+  const [busy, setBusy] = useState(false);
+  const run = async (action: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await action();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return [busy, run];
+}
+
 export function Toaster() {
   const [msg, setMsg] = useState<string | null>(null);
   useEffect(() => {

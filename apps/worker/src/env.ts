@@ -30,6 +30,8 @@ declare global {
 export interface ContactAuth {
   contactId: string;
   workspaceId: string;
+  /** Token epoch (see workspaces.contact_token_epoch). */
+  epoch: number;
 }
 
 export type AppBindings = {

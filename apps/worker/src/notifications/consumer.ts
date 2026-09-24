@@ -31,22 +31,25 @@ function preview(body: string, attachments: number): string {
 }
 
 async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "agent_reply" }>) {
-  const [conv, message] = await Promise.all([
+  const [conv, message, { results: allDevices }] = await Promise.all([
     env.DB.prepare("SELECT contact_id FROM conversations WHERE id = ? AND workspace_id = ?")
       .bind(job.conversationId, job.workspaceId)
       .first<{ contact_id: string }>(),
     getMessage(env.DB, job.messageId),
+    env.DB.prepare(
+      `SELECT d.token, d.platform, d.app_id, d.sandbox FROM push_devices d
+       JOIN conversations c ON c.contact_id = d.contact_id WHERE c.id = ? AND c.workspace_id = ?`,
+    )
+      .bind(job.conversationId, job.workspaceId)
+      .all<{ token: string; platform: "ios" | "android"; app_id: string; sandbox: number }>(),
   ]);
   if (!conv || !message) return;
+  const devices = job.onlyTokens ? allDevices.filter((d) => job.onlyTokens!.includes(d.token)) : allDevices;
+  // Most contacts (web) have no devices: skip waking the room.
+  if (devices.length === 0) return;
 
   // The contact is looking at the conversation: the socket already delivered it.
   if (await roomStub(env, job.conversationId).isContactConnected()) return;
-
-  const { results: allDevices } = await env.DB.prepare("SELECT token, platform, app_id, sandbox FROM push_devices WHERE contact_id = ?")
-    .bind(conv.contact_id)
-    .all<{ token: string; platform: "ios" | "android"; app_id: string; sandbox: number }>();
-  const devices = job.onlyTokens ? allDevices.filter((d) => job.onlyTokens!.includes(d.token)) : allDevices;
-  if (devices.length === 0) return;
 
   const [creds, ws, badge] = await Promise.all([
     // Undecryptable credentials (e.g. after an ENCRYPTION_KEY rotation) won't fix themselves on retry.
@@ -145,27 +148,29 @@ async function emailDigest(env: Env, job: Extract<NotificationJob, { type: "emai
     await sendEmail(env, mail);
   } catch (err) {
     // ...but give the claim back if the send failed, or the queue retry would find it taken.
+    // Best-effort, keeping the send error as the one that's thrown and logged.
     await env.DB.prepare("UPDATE conversations SET last_emailed_at = ? WHERE id = ? AND last_emailed_at = ?")
       .bind(row.last_emailed_at, job.conversationId, claimedAt)
-      .run();
+      .run()
+      .catch((e: unknown) => logError("email claim release failed", e, job));
     throw err;
   }
 }
 
 async function notifyAgents(env: Env, job: Extract<NotificationJob, { type: "new_conversation" }>) {
   if ((await inboxStub(env, job.workspaceId).onlineAgentIds()).length > 0) return;
-  const { results: agents } = await env.DB.prepare(
-    "SELECT a.email FROM workspace_members m JOIN agents a ON a.id = m.agent_id WHERE m.workspace_id = ?",
-  )
-    .bind(job.workspaceId)
-    .all<{ email: string }>();
-  const first = await env.DB.prepare(
-    `SELECT m.body, ct.name, ct.email FROM messages m JOIN conversations c ON c.id = m.conversation_id
-     JOIN contacts ct ON ct.id = c.contact_id WHERE m.conversation_id = ? ORDER BY m.id LIMIT 1`,
-  )
-    .bind(job.conversationId)
-    .first<{ body: string; name: string | null; email: string | null }>();
-  const ws = await findWorkspaceById(env.DB, job.workspaceId);
+  const [{ results: agents }, first, ws] = await Promise.all([
+    env.DB.prepare("SELECT a.email FROM workspace_members m JOIN agents a ON a.id = m.agent_id WHERE m.workspace_id = ?")
+      .bind(job.workspaceId)
+      .all<{ email: string }>(),
+    env.DB.prepare(
+      `SELECT m.body, ct.name, ct.email FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       JOIN contacts ct ON ct.id = c.contact_id WHERE m.conversation_id = ? ORDER BY m.id LIMIT 1`,
+    )
+      .bind(job.conversationId)
+      .first<{ body: string; name: string | null; email: string | null }>(),
+    findWorkspaceById(env.DB, job.workspaceId),
+  ]);
   if (!ws) return;
   const who = mailSafe(first?.name ?? first?.email ?? "") || "A customer";
   const url = `${env.PUBLIC_URL}/w/${job.workspaceId}/inbox/${job.conversationId}`;

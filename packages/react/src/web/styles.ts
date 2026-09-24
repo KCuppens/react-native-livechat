@@ -12,10 +12,10 @@ export const MESSENGER_CSS = `
   font-size:15px;line-height:1.45;color:var(--lc-text);-webkit-font-smoothing:antialiased;
 }
 @media (prefers-color-scheme:dark){.lc-root:not([data-theme="light"]){
-  --lc-bg:#15171c;--lc-surface:#1e2128;--lc-surface-2:#272b33;--lc-border:#2e323b;--lc-text:#f3f4f6;--lc-muted:#9ca3af;
+  --lc-bg:#15171c;--lc-surface:#1e2128;--lc-surface-2:#272b33;--lc-border:#2e323b;--lc-text:#f3f4f6;--lc-muted:#9ca3af;--lc-danger:#f87171;
   --lc-shadow:0 12px 48px rgba(0,0,0,.5);
 }}
-.lc-root[data-theme="dark"]{--lc-bg:#15171c;--lc-surface:#1e2128;--lc-surface-2:#272b33;--lc-border:#2e323b;--lc-text:#f3f4f6;--lc-muted:#9ca3af}
+.lc-root[data-theme="dark"]{--lc-bg:#15171c;--lc-surface:#1e2128;--lc-surface-2:#272b33;--lc-border:#2e323b;--lc-text:#f3f4f6;--lc-muted:#9ca3af;--lc-danger:#f87171}
 .lc-root *,.lc-root *::before,.lc-root *::after{box-sizing:border-box}
 .lc-root button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .lc-root button:focus-visible,.lc-root a:focus-visible,.lc-root textarea:focus-visible,.lc-root input:focus-visible{outline:2px solid var(--lc-primary);outline-offset:2px}
@@ -25,14 +25,15 @@ export const MESSENGER_CSS = `
   background:var(--lc-primary)!important;color:var(--lc-on-primary)!important;box-shadow:var(--lc-shadow);display:grid;place-items:center;transition:transform .15s}
 .lc-launcher:hover{transform:scale(1.05)}
 .lc-launcher svg{width:28px;height:28px}
-.lc-badge{position:absolute;top:-2px;right:-2px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--lc-danger);
+.lc-badge{position:absolute;top:-2px;right:-2px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#dc2626;
   color:#fff;font-size:12px;font-weight:600;display:grid;place-items:center;border:2px solid var(--lc-bg)}
 
 .lc-panel{position:fixed;right:20px;bottom:92px;z-index:2147483000;width:400px;height:min(680px,calc(100vh - 120px));
   background:var(--lc-bg);border-radius:var(--lc-radius);box-shadow:var(--lc-shadow);display:flex;flex-direction:column;overflow:hidden;
   animation:lc-in .18s ease-out}
 .lc-panel.lc-inline{position:relative;right:auto;bottom:auto;width:100%;height:100%;box-shadow:none;border:1px solid var(--lc-border);animation:none}
-@media (max-width:480px){.lc-panel:not(.lc-inline){inset:0;width:auto;height:auto;border-radius:0}}
+/* Full screen on phones; the launcher would cover the composer's send button, so it hides (the header has Close). */
+@media (max-width:480px){.lc-panel:not(.lc-inline){inset:0;width:auto;height:auto;border-radius:0}.lc-launcher.lc-open{display:none}}
 @keyframes lc-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 
 .lc-header{display:flex;align-items:center;gap:8px;padding:12px 12px;border-bottom:1px solid var(--lc-border);min-height:56px}
@@ -85,7 +86,6 @@ export const MESSENGER_CSS = `
 
 .lc-empty,.lc-loading,.lc-error-state{padding:32px 20px;text-align:center;color:var(--lc-muted)}
 .lc-error-state button{margin-top:8px;color:var(--lc-primary);font-weight:500}
-.lc-error-state .lc-error-actions{display:flex;gap:16px;justify-content:center}
 .lc-spinner{width:22px;height:22px;border:2px solid var(--lc-border);border-top-color:var(--lc-primary);border-radius:50%;animation:lc-spin .8s linear infinite;margin:0 auto}
 @keyframes lc-spin{to{transform:rotate(360deg)}}
 

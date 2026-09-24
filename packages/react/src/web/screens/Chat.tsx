@@ -71,10 +71,31 @@ function CsatCard({ score, onSubmit }: { score: number | null; onSubmit: (score:
   return (
     <div className="lc-csat">
       <strong>{t("csat.question")}</strong>
-      <div className="lc-csat-scores" role="radiogroup" aria-label={t("csat.question")}>
+      {/* ARIA radio pattern: one Tab stop (roving tabindex), arrow keys move the selection. */}
+      <div
+        className="lc-csat-scores"
+        role="radiogroup"
+        aria-label={t("csat.question")}
+        onKeyDown={(e) => {
+          const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+          if (!step) return;
+          e.preventDefault();
+          const next = ((((selected ?? (step > 0 ? 0 : 1)) - 1 + step) % 5) + 5) % 5 + 1;
+          setSelected(next);
+          (e.currentTarget.children[next - 1] as HTMLElement | undefined)?.focus();
+        }}
+      >
         {CSAT_FACES.map((face, i) => (
           // biome-ignore lint/a11y/useSemanticElements: ARIA radio pattern on buttons (emoji faces can't be styled as native radios)
-          <button type="button" key={face} role="radio" aria-checked={selected === i + 1} aria-label={t("csat.score", { score: i + 1 })} onClick={() => setSelected(i + 1)}>
+          <button
+            type="button"
+            key={face}
+            role="radio"
+            tabIndex={(selected ?? 1) === i + 1 ? 0 : -1}
+            aria-checked={selected === i + 1}
+            aria-label={t("csat.score", { score: i + 1 })}
+            onClick={() => setSelected(i + 1)}
+          >
             {face}
           </button>
         ))}
@@ -146,7 +167,6 @@ const MessageList = memo(function MessageList({
   onRetry: (clientId: string) => Promise<unknown>;
   onCsat: (score: number, comment?: string) => Promise<void>;
 }) {
-  const t = useTranslate();
   let lastMine: ChatMessage | undefined;
   for (let i = messages.length - 1; i >= 0 && !lastMine; i--) {
     const m = messages[i]!;
@@ -162,41 +182,72 @@ const MessageList = memo(function MessageList({
           }
           return <SystemMessage key={m.id} message={m} />;
         }
-        const mine = m.authorType === "contact";
         const prev = messages[i - 1];
         const next = messages[i + 1];
-        const first = !prev || prev.authorType !== m.authorType || prev.author?.id !== m.author?.id;
-        const lastOfGroup = !next || next.authorType !== m.authorType || next.author?.id !== m.author?.id;
         return (
-          <div key={m.id} className={`lc-msg${mine ? " lc-mine" : ""}${first ? " lc-first" : ""}`}>
-            {!mine && (
-              <span className={lastOfGroup ? "" : "lc-avatar lc-hidden"}>
-                {lastOfGroup && <Avatar name={m.author?.name} url={m.author?.avatarUrl} />}
-              </span>
-            )}
-            <div className="lc-bubble-wrap">
-              {!mine && first && <div className="lc-author">{m.author?.name ?? t("chat.support")}</div>}
-              {m.body && (
-                <div
-                  className={`lc-bubble${m.status === "sending" ? " lc-pending" : ""}${m.status === "failed" ? " lc-failed" : ""}`}
-                  title={clockTime(m.createdAt, locale)}
-                >
-                  <Markdown source={m.body} />
-                </div>
-              )}
-              <Attachments items={m.attachments} />
-              {m.status === "failed" && (
-                <button type="button" className="lc-meta lc-danger" onClick={() => void onRetry(m.clientId!)}>
-                  {t("chat.failed")}
-                </button>
-              )}
-              {m.status === "sending" && <div className="lc-meta">{t("chat.sending")}</div>}
-              {m === lastMine && seen && <div className="lc-meta">{t("chat.seen")}</div>}
-            </div>
-          </div>
+          <MessageRow
+            key={m.id}
+            m={m}
+            first={!prev || prev.authorType !== m.authorType || prev.author?.id !== m.author?.id}
+            lastOfGroup={!next || next.authorType !== m.authorType || next.author?.id !== m.author?.id}
+            seen={m === lastMine && !!seen}
+            locale={locale}
+            onRetry={onRetry}
+          />
         );
       })}
     </>
+  );
+});
+
+/**
+ * One bubble. Memoized per row: the merge keeps unchanged messages' identity, so a new message
+ * re-renders (and re-parses markdown for) only the rows whose grouping or state changed.
+ */
+const MessageRow = memo(function MessageRow({
+  m,
+  first,
+  lastOfGroup,
+  seen,
+  locale,
+  onRetry,
+}: {
+  m: ChatMessage;
+  first: boolean;
+  lastOfGroup: boolean;
+  seen: boolean;
+  locale: string;
+  onRetry: (clientId: string) => Promise<unknown>;
+}) {
+  const t = useTranslate();
+  const mine = m.authorType === "contact";
+  return (
+    <div className={`lc-msg${mine ? " lc-mine" : ""}${first ? " lc-first" : ""}`}>
+      {!mine && (
+        <span className={lastOfGroup ? "" : "lc-avatar lc-hidden"}>
+          {lastOfGroup && <Avatar name={m.author?.name} url={m.author?.avatarUrl} />}
+        </span>
+      )}
+      <div className="lc-bubble-wrap">
+        {!mine && first && <div className="lc-author">{m.author?.name ?? t("chat.support")}</div>}
+        {m.body && (
+          <div
+            className={`lc-bubble${m.status === "sending" ? " lc-pending" : ""}${m.status === "failed" ? " lc-failed" : ""}`}
+            title={clockTime(m.createdAt, locale)}
+          >
+            <Markdown source={m.body} />
+          </div>
+        )}
+        <Attachments items={m.attachments} />
+        {m.status === "failed" && (
+          <button type="button" className="lc-meta lc-danger" onClick={() => void onRetry(m.clientId!)}>
+            {t("chat.failed")}
+          </button>
+        )}
+        {m.status === "sending" && <div className="lc-meta">{t("chat.sending")}</div>}
+        {seen && <div className="lc-meta">{t("chat.seen")}</div>}
+      </div>
+    </div>
   );
 });
 
@@ -218,15 +269,22 @@ export function ChatScreen({ conversationId }: { conversationId: string | null }
   const suggestions = useArticleSuggestions(conversationId ? "" : draft);
 
   const messages = thread.messages;
-  const lastCount = useRef(0);
+  // "Load older" prepends: keep the viewport on what the user was reading. New messages at the
+  // bottom are followed while the user is at the bottom, or when they sent one themselves.
+  const prevEnds = useRef({ first: undefined as string | undefined, last: undefined as string | undefined, height: 0 });
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-evaluate scrolling when the typing indicator appears
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const last = messages[messages.length - 1];
-    const grew = messages.length > lastCount.current;
-    lastCount.current = messages.length;
-    if (grew && (stickToBottom.current || last?.authorType === "contact")) el.scrollTop = el.scrollHeight;
+    const first = messages[0]?.id;
+    const lastMsg = messages[messages.length - 1];
+    const p = prevEnds.current;
+    if (p.first && first !== p.first && lastMsg?.id === p.last) {
+      el.scrollTop += el.scrollHeight - p.height;
+    } else if (lastMsg?.id !== p.last ? stickToBottom.current || lastMsg?.authorType === "contact" : stickToBottom.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    prevEnds.current = { first, last: lastMsg?.id, height: el.scrollHeight };
   }, [messages, thread.typing]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the composer when switching conversations
@@ -352,11 +410,11 @@ export function ChatScreen({ conversationId }: { conversationId: string | null }
 
       <div className="lc-composer">
         {uploads.length > 0 && (
-          <div className="lc-chips">
+          <div className="lc-chips" aria-live="polite">
             {uploads.map((u) => (
               <div key={u.key} className={`lc-chip${u.state === "uploading" ? " lc-uploading" : ""}${u.state === "error" ? " lc-chip-error" : ""}`} title={u.error}>
                 <span>{u.state === "error" ? `${u.name} — ${u.error}` : u.name}</span>
-                <button type="button" aria-label={t("common.close")} onClick={() => setUploads((all) => all.filter((x) => x.key !== u.key))}>
+                <button type="button" aria-label={t("chat.removeAttachment", { name: u.name })} onClick={() => setUploads((all) => all.filter((x) => x.key !== u.key))}>
                   <CloseIcon />
                 </button>
               </div>

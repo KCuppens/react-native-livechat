@@ -25,6 +25,7 @@ export const nl: Strings = {
   "chat.placeholder": "Schrijf een bericht…",
   "chat.send": "Verstuur",
   "chat.attach": "Bestand toevoegen",
+  "chat.removeAttachment": "{name} verwijderen",
   "chat.suggestedArticles": "Deze artikels kunnen helpen",
   "chat.typing": "{name} is aan het typen…",
   "chat.someoneTyping": "Aan het typen…",

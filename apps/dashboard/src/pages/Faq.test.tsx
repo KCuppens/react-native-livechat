@@ -295,7 +295,8 @@ describe("FaqPage article editor", () => {
   it("shows 'Article not found' for an unknown article id", async () => {
     stubApi(routes({ articles: [article("a1")], categories: [] }));
     renderFaq("/w/ws_1/faq/nope");
-    expect(await screen.findByText("Article not found")).toBeTruthy();
+    expect(await screen.findByText(/Article not found/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to the help center" }).getAttribute("href")).toBe("/w/ws_1/faq");
   });
 
   it("edits a new article with a live preview and POSTs it, then replaces the URL with the new id", async () => {
@@ -326,16 +327,16 @@ describe("FaqPage article editor", () => {
     fireEvent.change(bodyInput(), { target: { value: "Use **cards** or *cash*." } });
 
     expect(slugInput().value).toBe("how-to-pay");
-    expect(tabNames()).toEqual(["EN ○", "NL"]);
+    expect(tabNames()).toEqual(["EN ○ (draft)", "NL"]);
     expect(preview(container).querySelector("h2")!.textContent).toBe("  How to pay  ");
     expect(preview(container).querySelector(".lc-md strong")!.textContent).toBe("cards");
     expect(preview(container).querySelector(".lc-md em")!.textContent).toBe("cash");
 
     expect(publish().disabled).toBe(false);
     fireEvent.click(publish());
-    expect(tabNames()).toEqual(["EN ●", "NL"]);
+    expect(tabNames()).toEqual(["EN ● (published)", "NL"]);
 
-    // A locale with a body but no title isn't sent.
+    // A locale with a body but no title blocks the save and is pointed out (not silently dropped).
     fireEvent.click(screen.getByRole("tab", { name: "NL" }));
     expect(titleInput().value).toBe("");
     fireEvent.change(bodyInput(), { target: { value: "alleen tekst" } });
@@ -343,6 +344,12 @@ describe("FaqPage article editor", () => {
 
     fireEvent.change(screen.getByLabelText("Category"), { target: { value: "cat_1" } });
     const replace = vi.spyOn(history, "replaceState");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Add a title for NL");
+    expect(api.find("POST", `${W}/faq/articles`)).toHaveLength(0);
+
+    // Clearing that body leaves NL out, and the save goes through.
+    fireEvent.change(bodyInput(), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Saved")).toBeTruthy();
@@ -375,7 +382,8 @@ describe("FaqPage article editor", () => {
     fireEvent.change(bodyInput(), { target: { value: "Just a body" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByText("Add a title first")).toBeTruthy();
+    // Content without a title is pointed out inline instead of being dropped.
+    expect((await screen.findByRole("alert")).textContent).toContain("Add a title for EN");
     expect(api.find("POST", `${W}/faq/articles`)).toHaveLength(0);
     expect(location.pathname).toBe("/w/ws_1/faq/new");
   });
@@ -407,7 +415,7 @@ describe("FaqPage article editor", () => {
     const { container } = renderFaq("/w/ws_1/faq/a1");
     await screen.findByRole("heading", { name: "Pay invoices", level: 1 });
 
-    expect(tabNames()).toEqual(["EN ●", "NL ○"]);
+    expect(tabNames()).toEqual(["EN ● (published)", "NL ○ (draft)"]);
     expect(titleInput().value).toBe("Pay invoices");
     expect(slugInput().value).toBe("pay-invoices");
     expect(publish().checked).toBe(true);
@@ -443,7 +451,7 @@ describe("FaqPage article editor", () => {
 
     expect(screen.queryByRole("button", { name: "Remove NL translation" })).toBeNull();
     expect(titleInput().value).toBe("");
-    expect(tabNames()).toEqual(["EN ●", "NL"]);
+    expect(tabNames()).toEqual(["EN ● (published)", "NL"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.find("PATCH", `${W}/faq/articles/a1`)).toHaveLength(1));

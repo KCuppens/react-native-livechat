@@ -7,16 +7,21 @@ import { roomStub } from "./publish";
 
 /** Rooms remembered per agent; the oldest drop off (a dashboard only has a few open at once). */
 const MAX_TRACKED_ROOMS = 100;
-/** Rooms where contacts connected recently, so revoking contact sessions can reach their sockets. */
-const MAX_CONTACT_ROOMS = 1000;
-const CONTACT_ROOMS_KEY = "contactRooms";
+/**
+ * Rooms where contacts connected, one storage key each (`contactRoom:<id>` → last seen), so a
+ * rotation can reach their sockets. Keys not refreshed for this long are pruned: sockets
+ * reconnect far more often than that.
+ */
+const CONTACT_ROOM_PREFIX = "contactRoom:";
+const CONTACT_ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** A tracked room's timestamp is refreshed at most this often (reconnects mostly cost no write). */
+const CONTACT_ROOM_REFRESH_MS = 24 * 60 * 60 * 1000;
 /** Parallel room RPCs when disconnecting contacts. */
 const DISCONNECT_BATCH = 50;
 
-/** Live feed of conversation changes + agent presence for one workspace's dashboard. */
 export class WorkspaceInbox extends DurableObject<Env> {
-  /** In-memory copy of CONTACT_ROOMS_KEY: reconnects to a known room cost no storage write. */
-  private contactRooms: string[] | null = null;
+  /** When this instance last wrote each room's key (avoids a storage write per reconnect). */
+  private contactRoomWrites = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -48,26 +53,40 @@ export class WorkspaceInbox extends DurableObject<Env> {
 
   /** RPC: remember that a contact connected to a conversation's room. */
   async trackContactRoom(conversationId: string): Promise<void> {
-    this.contactRooms ??= (await this.ctx.storage.get<string[]>(CONTACT_ROOMS_KEY)) ?? [];
-    if (this.contactRooms.includes(conversationId)) return;
-    this.contactRooms = [...this.contactRooms, conversationId].slice(-MAX_CONTACT_ROOMS);
-    await this.ctx.storage.put(CONTACT_ROOMS_KEY, this.contactRooms);
+    const now = Date.now();
+    if (now - (this.contactRoomWrites.get(conversationId) ?? 0) < CONTACT_ROOM_REFRESH_MS) return;
+    this.contactRoomWrites.set(conversationId, now);
+    await this.ctx.storage.put(CONTACT_ROOM_PREFIX + conversationId, now);
   }
 
   /**
-   * RPC: close contact sockets in every tracked room (the identity secret was rotated, which
-   * revokes their tokens). Clients get a new session and reconnect.
+   * RPC: close contact sockets authorized before `minEpoch` in every tracked room (the identity
+   * secret was rotated, which revokes those tokens). Clients get a new session and reconnect.
+   * Rooms that couldn't be reached stay tracked, so a later call retries them.
    */
-  async disconnectContacts(): Promise<void> {
-    const rooms = this.contactRooms ?? (await this.ctx.storage.get<string[]>(CONTACT_ROOMS_KEY)) ?? [];
-    this.contactRooms = [];
-    await this.ctx.storage.delete(CONTACT_ROOMS_KEY);
-    let failed = 0;
-    for (let i = 0; i < rooms.length; i += DISCONNECT_BATCH) {
-      const results = await Promise.allSettled(rooms.slice(i, i + DISCONNECT_BATCH).map((id) => roomStub(this.env, id).disconnectContacts()));
-      failed += results.filter((r) => r.status === "rejected").length;
+  async disconnectContacts(minEpoch: number): Promise<void> {
+    const cutoff = Date.now() - CONTACT_ROOM_TTL_MS;
+    const failed: string[] = [];
+    let total = 0;
+    let startAfter: string | undefined;
+    for (;;) {
+      const page = await this.ctx.storage.list<number>({ prefix: CONTACT_ROOM_PREFIX, startAfter, limit: 500 });
+      if (page.size === 0) break;
+      const stale: string[] = [];
+      const live: string[] = [];
+      for (const [key, seenAt] of page) (seenAt < cutoff ? stale : live).push(key);
+      for (let i = 0; i < live.length; i += DISCONNECT_BATCH) {
+        const keys = live.slice(i, i + DISCONNECT_BATCH);
+        const results = await Promise.allSettled(keys.map((k) => roomStub(this.env, k.slice(CONTACT_ROOM_PREFIX.length)).disconnectContacts(minEpoch)));
+        results.forEach((r, j) => {
+          if (r.status === "rejected") failed.push(keys[j]!.slice(CONTACT_ROOM_PREFIX.length));
+        });
+      }
+      total += live.length;
+      if (stale.length > 0) await this.ctx.storage.delete(stale);
+      startAfter = [...page.keys()].at(-1);
     }
-    if (failed > 0) console.error({ msg: "disconnectContacts failed for rooms", failed, total: rooms.length });
+    if (failed.length > 0) console.error({ msg: "disconnectContacts failed for rooms", rooms: failed.slice(0, 50), failed: failed.length, total });
   }
 
   /**

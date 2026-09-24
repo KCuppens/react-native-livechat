@@ -25,6 +25,7 @@ export const fr: Strings = {
   "chat.placeholder": "Écrivez un message…",
   "chat.send": "Envoyer",
   "chat.attach": "Joindre un fichier",
+  "chat.removeAttachment": "Retirer {name}",
   "chat.suggestedArticles": "Ces articles pourraient vous aider",
   "chat.typing": "{name} est en train d'écrire…",
   "chat.someoneTyping": "En train d'écrire…",

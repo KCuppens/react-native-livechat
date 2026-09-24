@@ -1,4 +1,5 @@
 import type { Attachment, CannedReply } from "@kobecuppens/livechat-protocol";
+import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE } from "@kobecuppens/livechat-protocol/constants";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "../api";
 import { toast } from "../components/ui";
@@ -79,7 +80,7 @@ export function Composer({
     if (!files?.length) return;
     setUploading(true);
     try {
-      for (const f of [...files].slice(0, 5 - uploads.length)) {
+      for (const f of [...files].slice(0, MAX_ATTACHMENTS_PER_MESSAGE - uploads.length)) {
         const att = await api.upload(workspaceId, f);
         setUploads((u) => [...u, att]);
       }
@@ -150,7 +151,7 @@ export function Composer({
             type="file"
             hidden
             multiple
-            accept="image/*,application/pdf"
+            accept={ALLOWED_ATTACHMENT_TYPES.join(",")}
             onChange={(e) => {
               void upload(e.target.files);
               e.target.value = "";

@@ -111,6 +111,14 @@ export const ConversationPane = memo(function ConversationPane({
         )}
       </header>
 
+      {thread.liveStopped && (
+        <div className="live-banner" role="status">
+          Live updates stopped for this conversation.
+          <button type="button" className="btn btn-sm" onClick={() => location.reload()}>
+            Reload
+          </button>
+        </div>
+      )}
       <div
         className="thread-messages"
         ref={listRef}
@@ -136,26 +144,7 @@ export const ConversationPane = memo(function ConversationPane({
                 {thread.loadingOlder ? "Loading…" : "Load earlier"}
               </button>
             )}
-            {messages.map((m) =>
-              m.authorType === "system" ? (
-                <div key={m.id} className="sys">
-                  {SYSTEM_TEXT[m.systemEvent ?? ""]?.(m) ?? m.systemEvent}
-                </div>
-              ) : (
-                <div key={m.id} className={`msg ${m.authorType}`}>
-                  {m.body && (
-                    <div className="msg-bubble">
-                      <Markdown source={m.body} />
-                    </div>
-                  )}
-                  <MessageAttachments items={m.attachments} />
-                  <div className="msg-meta">
-                    {m.authorType === "agent" ? m.author?.name : contact} · {timeFormat.format(m.createdAt)}
-                    {m === lastAgent && seen && " · Seen"}
-                  </div>
-                </div>
-              ),
-            )}
+            <ThreadMessages messages={messages} contact={contact} seenId={seen ? lastAgent?.id : undefined} />
             {pending.map((p) => (
               <div key={p.clientId} className="msg agent pending">
                 {p.body && <div className="msg-bubble">{p.body}</div>}
@@ -178,6 +167,37 @@ export const ConversationPane = memo(function ConversationPane({
 
       <Composer workspaceId={workspaceId} contactLabel={contact} fillTemplate={fillTemplate} onSend={thread.send} onTyping={sendTyping} />
     </section>
+  );
+});
+
+/**
+ * Memoized: typing, presence, read receipts and inbox summaries re-render the pane often; the
+ * (possibly long, markdown-heavy) message list only changes with its messages.
+ */
+const ThreadMessages = memo(function ThreadMessages({ messages, contact, seenId }: { messages: Message[]; contact: string; seenId?: string }) {
+  return (
+    <>
+      {messages.map((m) =>
+        m.authorType === "system" ? (
+          <div key={m.id} className="sys">
+            {SYSTEM_TEXT[m.systemEvent ?? ""]?.(m) ?? m.systemEvent}
+          </div>
+        ) : (
+          <div key={m.id} className={`msg ${m.authorType}`}>
+            {m.body && (
+              <div className="msg-bubble">
+                <Markdown source={m.body} />
+              </div>
+            )}
+            <MessageAttachments items={m.attachments} />
+            <div className="msg-meta">
+              {m.authorType === "agent" ? m.author?.name : contact} · {timeFormat.format(m.createdAt)}
+              {m.id === seenId && " · Seen"}
+            </div>
+          </div>
+        ),
+      )}
+    </>
   );
 });
 

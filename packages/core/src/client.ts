@@ -146,6 +146,11 @@ export class LiveChatClient {
    */
   private epoch = 0;
   private readTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * In-flight loads per conversation. A load requested while one runs is coalesced into a single
+   * follow-up after it (its read may predate whatever triggered the new request).
+   */
+  private loads = new Map<string, { run: Promise<void>; again: "none" | "messages" | "full" }>();
   /** Last registered push device, moved to the new identity on login/logout. */
   private pushDevice: PushDeviceRequest | null = null;
   /** The push device still has to be registered with the current identity (a move failed). */
@@ -379,6 +384,7 @@ export class LiveChatClient {
     this.clearTimers();
     this.outbox.clear();
     this.startingConversation = null;
+    this.loads.clear();
     this.store.set((s) => ({ conversations: [], conversationsLoaded: false, unreadCount: 0, threads: {}, identity: s.identity + 1 }));
   }
 
@@ -461,7 +467,8 @@ export class LiveChatClient {
           // Later opens are covered by onReconnect.
           if (!opened) {
             opened = true;
-            void this.loadLatest(conversationId);
+            // Messages only: the conversation itself came with the initial load.
+            void this.loadLatest(conversationId, "messages");
           }
         },
         onReconnect: () => void this.loadLatest(conversationId),
@@ -509,14 +516,32 @@ export class LiveChatClient {
     return this.loadLatest(conversationId);
   }
 
-  private async loadLatest(conversationId: string): Promise<void> {
+  private loadLatest(conversationId: string, what: "full" | "messages" = "full"): Promise<void> {
+    const inflight = this.loads.get(conversationId);
+    if (inflight) {
+      if (inflight.again !== "full") inflight.again = what;
+      return inflight.run;
+    }
+    const epoch = this.epoch;
+    const entry: { run: Promise<void>; again: "none" | "messages" | "full" } = { run: Promise.resolve(), again: "none" };
+    entry.run = this.fetchLatest(conversationId, what).finally(() => {
+      if (this.loads.get(conversationId) === entry) this.loads.delete(conversationId);
+      if (entry.again !== "none" && epoch === this.epoch) void this.loadLatest(conversationId, entry.again);
+    });
+    this.loads.set(conversationId, entry);
+    return entry.run;
+  }
+
+  private async fetchLatest(conversationId: string, what: "full" | "messages"): Promise<void> {
     const epoch = this.epoch;
     const thread = this.state.threads[conversationId];
+    // A messages-only refresh needs the conversation from an earlier successful load.
+    const withConversation = what === "full" || !thread?.loaded;
     this.updateThread(conversationId, () => ({ loading: true, error: false }));
     try {
       const [page, conversation] = await Promise.all([
         this.http.listMessages(conversationId),
-        this.http.getConversation(conversationId),
+        withConversation ? this.http.getConversation(conversationId) : null,
       ]);
       if (epoch !== this.epoch) return;
       this.updateThread(conversationId, (t) => ({
@@ -525,9 +550,9 @@ export class LiveChatClient {
         loaded: true,
         loading: false,
         error: false,
-        agentLastReadAt: Math.max(t.agentLastReadAt, conversation.agentLastReadAt),
+        agentLastReadAt: Math.max(t.agentLastReadAt, conversation?.agentLastReadAt ?? 0),
       }));
-      this.upsertConversation(conversation);
+      if (conversation) this.upsertConversation(conversation);
     } catch {
       if (epoch !== this.epoch) return;
       this.updateThread(conversationId, (t) => ({ loading: false, error: !t.loaded }));
@@ -549,6 +574,7 @@ export class LiveChatClient {
         loading: false,
       }));
     } catch {
+      if (epoch !== this.epoch) return;
       this.updateThread(conversationId, () => ({ loading: false }));
     }
   }
@@ -765,7 +791,9 @@ export class LiveChatClient {
   // ---------------------------------------------------------------- misc
 
   async submitCsat(conversationId: string, input: CsatRequest): Promise<void> {
+    const epoch = this.epoch;
     await this.http.submitCsat(conversationId, input);
+    if (epoch !== this.epoch) return;
     this.patchConversation(conversationId, { csatScore: input.score });
   }
 

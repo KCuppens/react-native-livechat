@@ -3,6 +3,7 @@ import type { Conversation, FaqArticleSummary, Message, SessionResponse } from "
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/index";
 import * as mailer from "../src/lib/mailer";
+import * as conversations from "../src/services/conversations";
 import { devOutbox } from "../src/lib/mailer";
 import { setupAgentWorkspace } from "./agent-helpers";
 import { json } from "./helpers";
@@ -170,5 +171,56 @@ describe("bulletproof round 2 regressions", () => {
     const closed = new Promise<number>((resolve) => contactWs.addEventListener("close", (e) => resolve(e.code)));
     await admin.call(`/agent/w/${ws.id}/settings/rotate-identity-secret`, { method: "POST" });
     expect(await closed).toBe(4401);
+  });
+});
+
+describe("bulletproof round 3 regressions", () => {
+  it("a start retry saves the message when the first attempt left the conversation empty", async () => {
+    const { ws, publicCall, contactToken, contactId } = await setupAgentWorkspace();
+    await env.DB.prepare(
+      "INSERT INTO conversations (id, workspace_id, contact_id, first_client_id, last_message_at, contact_last_read_at, created_at) VALUES ('cv_empty', ?, ?, 'client-9', 1, 1, 1)",
+    )
+      .bind(ws.id, contactId)
+      .run();
+    const res = await publicCall("/v1/conversations", { method: "POST", token: contactToken, body: json({ clientId: "client-9", body: "Hello?" }) });
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as { conversation: Conversation; message: Message | null };
+    expect(out.conversation.id).toBe("cv_empty");
+    expect(out.message?.body).toBe("Hello?");
+  });
+
+  it("a resolve whose notice fails is undone, so the retry posts the notice and the rating request", async () => {
+    const { admin, base, conversationId, publicCall, contactToken } = await withConversation();
+    const real = conversations.insertMessage;
+    const spy = vi.spyOn(conversations, "insertMessage").mockImplementationOnce(async (db, input) => {
+      if (input.systemEvent === "resolved") throw new Error("d1 hiccup");
+      return real(db, input);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = await admin.call(`${base}/conversations/${conversationId}`, { method: "PATCH", body: json({ status: "resolved" }) });
+    expect(failed.status).toBe(500);
+    const row = await env.DB.prepare("SELECT status, csat_requested_at FROM conversations WHERE id = ?").bind(conversationId).first<{ status: string; csat_requested_at: number | null }>();
+    expect(row).toMatchObject({ status: "open", csat_requested_at: null });
+    spy.mockRestore();
+    expect((await admin.call(`${base}/conversations/${conversationId}`, { method: "PATCH", body: json({ status: "resolved" }) })).status).toBe(200);
+    const msgs = (await (await publicCall(`/v1/conversations/${conversationId}/messages`, { token: contactToken })).json()) as { items: Message[] };
+    expect(msgs.items.filter((m) => m.systemEvent === "resolved")).toHaveLength(1);
+    expect(msgs.items.filter((m) => m.systemEvent === "csat_request")).toHaveLength(1);
+  });
+
+  it("concurrent sign-in requests can't get past the per-email cap", async () => {
+    await setupAgentWorkspace();
+    const before = devOutbox.length;
+    const request = () =>
+      app.request(
+        "/agent/auth/magic-link",
+        { method: "POST", headers: { "Content-Type": "application/json", "X-Livechat-Dashboard": "1" }, body: json({ email: "owner@acme.com" }) },
+        env,
+      );
+    await Promise.all(Array.from({ length: 6 }, request));
+    // The per-IP route limiter may turn some away first; the cap must never be exceeded.
+    const sent = devOutbox.slice(before).filter((m) => m.to === "owner@acme.com" && m.text.includes("#token=")).length;
+    expect(sent).toBeGreaterThan(0);
+    expect(sent).toBeLessThanOrEqual(3);
   });
 });

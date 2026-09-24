@@ -39,7 +39,7 @@ export async function maybeAutoReply(
     await env.DB.prepare("UPDATE conversations SET auto_replied_at = NULL WHERE id = ? AND auto_replied_at = ?")
       .bind(conversationId, now)
       .run()
-      .catch(() => {});
+      .catch((e) => console.error({ msg: "auto-reply claim release failed", conversationId, error: String(e) }));
     throw err;
   }
   await publishToConversation(env, conversationId, { type: "message.created", message });

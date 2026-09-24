@@ -36,6 +36,9 @@ export function useConversationThread(
   const accessLost = useRef(onAccessLost);
   accessLost.current = onAccessLost;
   const loadedOnce = useRef(false);
+  // Contact messages that arrived while the tab was hidden: read once the agent comes back.
+  const unreadWhileHidden = useRef(false);
+  const [liveStopped, setLiveStopped] = useState(false);
 
   useEffect(() => {
     if (summary) setConversation(summary);
@@ -49,7 +52,9 @@ export function useConversationThread(
     // Reconnect backfills only merge the newest page; keep the pagination cursor from the first load.
     if (!loadedOnce.current) setOlder(page.nextCursor);
     loadedOnce.current = true;
-    api.markRead(workspaceId, conversationId).catch(() => {});
+    // Only a visible thread counts as read (a background reconnect backfill must not say "Seen").
+    if (document.hidden) unreadWhileHidden.current = true;
+    else api.markRead(workspaceId, conversationId).catch(() => {});
   }, [workspaceId, conversationId]);
 
   useEffect(() => {
@@ -61,10 +66,21 @@ export function useConversationThread(
       clearTimeout(readTimer);
       readTimer = setTimeout(() => api.markRead(workspaceId, conversationId).catch(() => {}), 1000);
     };
+    const onVisible = () => {
+      if (document.hidden || !unreadWhileHidden.current) return;
+      unreadWhileHidden.current = false;
+      scheduleRead();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     const socket = new ReconnectingSocket<ServerEvent>({
       url: async () => api.socketUrl(`/agent/w/${workspaceId}/conversations/${conversationId}/ws`),
       onStateChange: () => {},
-      onTerminalClose: () => accessLost.current(),
+      // Closed for good (access revoked, signed out): re-check the session, and say that this
+      // thread no longer updates live (if access remains, a reload reconnects it).
+      onTerminalClose: () => {
+        setLiveStopped(true);
+        accessLost.current();
+      },
       onReconnect: () => void load().catch(() => {}),
       onEvent: (event) => {
         if (event.type === "message.created") {
@@ -73,7 +89,8 @@ export function useConversationThread(
           if (m.clientId) setPending((p) => p.filter((x) => x.clientId !== m.clientId));
           if (m.authorType === "contact") {
             setContactTyping(false);
-            if (!document.hidden) scheduleRead();
+            if (document.hidden) unreadWhileHidden.current = true;
+            else scheduleRead();
           }
         } else if (event.type === "typing" && event.authorType === "contact") {
           setContactTyping(event.typing);
@@ -91,6 +108,7 @@ export function useConversationThread(
     return () => {
       clearTimeout(typingTimeout);
       clearTimeout(readTimer);
+      document.removeEventListener("visibilitychange", onVisible);
       socket.stop();
     };
   }, [workspaceId, conversationId, load]);
@@ -138,5 +156,5 @@ export function useConversationThread(
     }
   };
 
-  return { conversation, messages, older, pending, contactTyping, loadFailed, loadingOlder, socketRef, retryLoad, loadOlder, send, retrySend, update };
+  return { conversation, messages, older, pending, contactTyping, loadFailed, loadingOlder, liveStopped, socketRef, retryLoad, loadOlder, send, retrySend, update };
 }

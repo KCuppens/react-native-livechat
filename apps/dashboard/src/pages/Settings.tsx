@@ -1,7 +1,7 @@
 import type { AgentMe, CannedReply, OfficeHours, UpdateWorkspaceSettingsRequest, WorkspaceSettings } from "@kobecuppens/livechat-protocol";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Member } from "../api";
-import { attempt, Avatar, Field, Spinner, toast } from "../components/ui";
+import { attempt, Avatar, Field, Spinner, toast, useBusy } from "../components/ui";
 import { useRouter } from "../router";
 
 const TABS = [
@@ -14,16 +14,21 @@ const TABS = [
 ] as const;
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** ~420 zones; computed once, not on every keystroke in the office-hours form. */
+const TIMEZONES = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : ["UTC"];
+
 const LANGUAGES: Record<string, string> = { en: "English", nl: "Nederlands", fr: "Français", de: "Deutsch", es: "Español", it: "Italiano", pt: "Português" };
 
 export function SettingsPage({ me, workspaceId, isAdmin, tab }: { me: AgentMe; workspaceId: string; isAdmin: boolean; tab: string }) {
   const { navigate } = useRouter();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadNonce is the Retry trigger
   useEffect(() => {
     setLoadFailed(false);
     api.settings(workspaceId).then(setSettings, () => setLoadFailed(true));
-  }, [workspaceId]);
+  }, [workspaceId, reloadNonce]);
 
   const save = async (patch: UpdateWorkspaceSettingsRequest) => {
     await attempt(async () => {
@@ -46,7 +51,16 @@ export function SettingsPage({ me, workspaceId, isAdmin, tab }: { me: AgentMe; w
       </div>
       {!isAdmin && tab !== "canned" && <p className="muted">Only workspace admins can change these settings.</p>}
       {!settings ? (
-        loadFailed ? <div className="empty">Couldn't load settings. Reload the page to try again.</div> : <Spinner />
+        loadFailed ? (
+          <div className="empty">
+            Couldn't load settings.{" "}
+            <button type="button" className="btn btn-sm" onClick={() => setReloadNonce((n) => n + 1)}>
+              Retry
+            </button>
+          </div>
+        ) : (
+          <Spinner />
+        )
       ) : (
         <fieldset disabled={!isAdmin && tab !== "canned"} style={{ border: 0, padding: 0, margin: 0, maxWidth: 820 }}>
           {tab === "general" && <GeneralTab settings={settings} save={save} />}
@@ -73,6 +87,7 @@ function Card({ title, description, children }: { title: string; description?: R
 
 function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p: UpdateWorkspaceSettingsRequest) => Promise<void> }) {
   const [name, setName] = useState(settings.name);
+  const [saving, run] = useBusy();
   const [color, setColor] = useState(settings.primaryColor);
   const [logo, setLogo] = useState(settings.logoUrl ?? "");
   const [locales, setLocales] = useState(settings.locales);
@@ -102,7 +117,13 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
               <input
                 type="checkbox"
                 checked={locales.includes(code)}
-                onChange={(e) => setLocales(e.target.checked ? [...locales, code] : locales.filter((l) => l !== code))}
+                // The last language can't be turned off; turning off the default moves it to the next one.
+                disabled={locales.length === 1 && locales.includes(code)}
+                onChange={(e) => {
+                  const next = e.target.checked ? [...locales, code] : locales.filter((l) => l !== code);
+                  setLocales(next);
+                  if (!next.includes(defaultLocale) && next[0]) setDefaultLocale(next[0]);
+                }}
               />
               {label}
             </label>
@@ -131,8 +152,9 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
       </Card>
       <button type="button"
         className="btn btn-primary"
+        disabled={saving}
         onClick={() =>
-          void save({
+          void run(() => save({
             name,
             primaryColor: color,
             logoUrl: logo.trim() || null,
@@ -140,10 +162,10 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
             defaultLocale,
             greeting: Object.fromEntries(Object.entries(greeting).filter(([l, v]) => locales.includes(l) && v.trim())),
             csatEnabled: csat,
-          })
+          }))
         }
       >
-        Save changes
+        {saving ? "Saving…" : "Save changes"}
       </button>
     </>
   );
@@ -153,6 +175,8 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
   const [hours, setHours] = useState<OfficeHours>(settings.officeHours);
   const [autoReply, setAutoReply] = useState(settings.autoReply);
   const [typical, setTypical] = useState(settings.typicalReplyMinutes?.toString() ?? "");
+  const [saving, run] = useBusy();
+  const timezoneOptions = useMemo(() => TIMEZONES.map((tz) => <option key={tz}>{tz}</option>), []);
   const windowFor = (day: number) => hours.windows.find((w) => w.day === day);
   const setDay = (day: number, w: { open: string; close: string } | null) =>
     setHours({ ...hours, windows: [...hours.windows.filter((x) => x.day !== day), ...(w ? [{ day, ...w }] : [])].sort((a, b) => a.day - b.day) });
@@ -166,9 +190,7 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
         </label>
         <Field label="Timezone">
           <select className="select" value={hours.timezone} onChange={(e) => setHours({ ...hours, timezone: e.target.value })} style={{ maxWidth: 320 }}>
-            {Intl.supportedValuesOf("timeZone").map((tz) => (
-              <option key={tz}>{tz}</option>
-            ))}
+            {timezoneOptions}
           </select>
         </Field>
         {DAYS.map((label, day) => {
@@ -205,15 +227,16 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
       </Card>
       <button type="button"
         className="btn btn-primary"
+        disabled={saving}
         onClick={() =>
-          void save({
+          void run(() => save({
             officeHours: hours,
             autoReply: Object.fromEntries(Object.entries(autoReply).filter(([, v]) => v.trim())),
             typicalReplyMinutes: typical ? Number(typical) : null,
-          })
+          }))
         }
       >
-        Save changes
+        {saving ? "Saving…" : "Save changes"}
       </button>
     </>
   );
@@ -222,6 +245,7 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
 function InstallTab({ settings, save, workspaceId }: { settings: WorkspaceSettings; save: (p: UpdateWorkspaceSettingsRequest) => Promise<void>; workspaceId: string }) {
   const [origins, setOrigins] = useState(settings.allowedOrigins.join("\n"));
   const [secret, setSecret] = useState<string | null>(null);
+  const [saving, run] = useBusy();
   const apiUrl = location.origin;
   return (
     <>
@@ -257,8 +281,14 @@ function InstallTab({ settings, save, workspaceId }: { settings: WorkspaceSettin
       </Card>
       <Card title="Allowed websites" description="Origins allowed to use the web widget (one per line, e.g. https://app.example.com). Use * to allow any. Mobile apps don't need this.">
         <textarea className="textarea" aria-label="Allowed websites" value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://app.example.com" />
-        <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => void save({ allowedOrigins: origins.split(/\s+/).filter(Boolean) })}>
-          Save origins
+        <button
+          type="button"
+          className="btn"
+          style={{ marginTop: 8 }}
+          disabled={saving}
+          onClick={() => void run(() => save({ allowedOrigins: origins.split(/\s+/).filter(Boolean) }))}
+        >
+          {saving ? "Saving…" : "Save origins"}
         </button>
       </Card>
       <Card title="React Native">
@@ -358,7 +388,12 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"agent" | "admin">("agent");
-  const reload = useCallback(() => attempt(async () => setMembers(await api.members(workspaceId)), "Couldn't load members"), [workspaceId]);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [inviting, run] = useBusy();
+  const reload = useCallback(async () => {
+    setLoadFailed(false);
+    if (!(await attempt(async () => setMembers(await api.members(workspaceId)), "Couldn't load members"))) setLoadFailed(true);
+  }, [workspaceId]);
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -370,13 +405,15 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
           style={{ alignItems: "flex-end", flexWrap: "wrap" }}
           onSubmit={async (e) => {
             e.preventDefault();
-            await attempt(async () => {
-              await api.invite(workspaceId, { email: email.trim(), name: name.trim() || undefined, role });
-              setEmail("");
-              setName("");
-              toast("Invite sent");
-              void reload();
-            }, "Invite failed");
+            await run(() =>
+              attempt(async () => {
+                await api.invite(workspaceId, { email: email.trim(), name: name.trim() || undefined, role });
+                setEmail("");
+                setName("");
+                toast("Invite sent");
+                void reload();
+              }, "Invite failed"),
+            );
           }}
         >
           <Field label="Email">
@@ -391,13 +428,15 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
               <option value="admin">Admin</option>
             </select>
           </Field>
-          <button type="submit" className="btn btn-primary" style={{ marginBottom: 14 }}>
-            Send invite
+          <button type="submit" className="btn btn-primary" style={{ marginBottom: 14 }} disabled={inviting}>
+            {inviting ? "Sending…" : "Send invite"}
           </button>
         </form>
       </Card>
       <Card title="Members">
-        {!members ? (
+        {!members && loadFailed ? (
+          <LoadFailed what="members" onRetry={() => void reload()} />
+        ) : !members ? (
           <Spinner />
         ) : (
           <table className="table">
@@ -438,7 +477,12 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
 function CannedTab({ workspaceId }: { workspaceId: string }) {
   const [items, setItems] = useState<CannedReply[] | null>(null);
   const [editing, setEditing] = useState<{ id: string | null; shortcut: string; title: string; body: string } | null>(null);
-  const reload = useCallback(() => attempt(async () => setItems(await api.canned(workspaceId)), "Couldn't load saved replies"), [workspaceId]);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [saving, run] = useBusy();
+  const reload = useCallback(async () => {
+    setLoadFailed(false);
+    if (!(await attempt(async () => setItems(await api.canned(workspaceId)), "Couldn't load saved replies"))) setLoadFailed(true);
+  }, [workspaceId]);
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -448,11 +492,13 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            await attempt(async () => {
-              await api.saveCanned(workspaceId, editing.id, { shortcut: editing.shortcut, title: editing.title, body: editing.body });
-              setEditing(null);
-              void reload();
-            }, "Save failed");
+            await run(() =>
+              attempt(async () => {
+                await api.saveCanned(workspaceId, editing.id, { shortcut: editing.shortcut, title: editing.title, body: editing.body });
+                setEditing(null);
+                void reload();
+              }, "Save failed"),
+            );
           }}
         >
           <div className="row">
@@ -467,7 +513,9 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
             <textarea className="textarea" required value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} />
           </Field>
           <div className="row">
-            <button type="submit" className="btn btn-primary">Save</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
             <button type="button" className="btn" onClick={() => setEditing(null)}>
               Cancel
             </button>
@@ -475,8 +523,12 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
         </form>
       ) : (
         <>
-          {!items ? (
+          {!items && loadFailed ? (
+            <LoadFailed what="saved replies" onRetry={() => void reload()} />
+          ) : !items ? (
             <Spinner />
+          ) : items.length === 0 ? (
+            <div className="empty">No saved replies yet. Create one, then type its /shortcut in the reply box to insert it.</div>
           ) : (
             <table className="table">
               <tbody>
@@ -516,5 +568,16 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
         </>
       )}
     </Card>
+  );
+}
+
+function LoadFailed({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <div className="empty">
+      Couldn't load {what}.{" "}
+      <button type="button" className="btn btn-sm" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
   );
 }

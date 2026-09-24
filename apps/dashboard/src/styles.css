@@ -46,6 +46,7 @@ h1 { font-size: 20px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
 .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; margin: 24px auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+.live-banner { padding: 8px 12px; font-size: 13px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
 
 /* Auth */

@@ -1,3 +1,4 @@
+import { ApiException } from "../lib/errors";
 import type { Agent, AgentMe, AgentRole } from "@kobecuppens/livechat-protocol";
 import type { Env } from "../env";
 import { randomToken, sha256Hex } from "../lib/crypto";
@@ -50,28 +51,36 @@ export async function sendMagicLink(env: Env, email: string, reason: "login" | "
   const known = (await getAgentByEmail(env.DB, email)) ?? (isSuperAdmin(env, email) ? await ensureAgent(env.DB, email) : null);
   if (!known) return;
 
-  // Per-recipient cap (the route limit is per IP, which rotating IPs bypass): silently skip so
-  // the response stays identical and nobody can flood an agent's inbox or burn email quota.
-  // Only unused links count: someone who actually signs in can always ask again. Invites are
-  // exempt: an authenticated admin sends them, and a silently skipped invite would look sent.
-  const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM magic_links WHERE email = ? AND used_at IS NULL AND expires_at > ?")
-    .bind(known.email, Date.now() + MAGIC_LINK_TTL_MS - MAGIC_LINK_WINDOW_MS)
-    .first<{ n: number }>();
-  if (reason === "login" && (recent?.n ?? 0) >= MAGIC_LINKS_PER_WINDOW) {
-    console.warn({ msg: "magic link cap reached", reason });
-    return;
-  }
-
+  // Per-recipient cap (the route limit is per IP, which rotating IPs bypass), so nobody can flood
+  // an address or burn email quota. Only unused links count: someone who actually signs in can
+  // always ask again. Check and insert are one statement, so concurrent requests can't all pass.
   const token = randomToken(32);
   const tokenHash = await sha256Hex(token);
-  await env.DB.prepare("INSERT INTO magic_links (token_hash, email, expires_at) VALUES (?, ?, ?)")
-    .bind(tokenHash, known.email, Date.now() + MAGIC_LINK_TTL_MS)
+  const now = Date.now();
+  const inserted = await env.DB.prepare(
+    `INSERT INTO magic_links (token_hash, email, expires_at)
+     SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM magic_links WHERE email = ?2 AND used_at IS NULL AND expires_at > ?4) < ?5`,
+  )
+    .bind(tokenHash, known.email, now + MAGIC_LINK_TTL_MS, now + MAGIC_LINK_TTL_MS - MAGIC_LINK_WINDOW_MS, MAGIC_LINKS_PER_WINDOW)
     .run();
+  if (inserted.meta.changes === 0) {
+    console.warn({ msg: "magic link cap reached", reason });
+    // Login: silent, so the response doesn't reveal accounts. Invite: the admin is authenticated
+    // and must not think an email went out.
+    if (reason === "invite") {
+      throw new ApiException(429, "invite_rate_limited", "They're added, but this address was emailed several times recently. Try resending in a few minutes.");
+    }
+    return;
+  }
   // Token lives in the fragment so it never reaches server logs or Referer headers.
   const url = `${env.PUBLIC_URL}/login/verify#token=${token}`;
   const invite = reason === "invite";
   // A link that was never delivered must not count toward the cap above.
-  const forget = () => env.DB.prepare("DELETE FROM magic_links WHERE token_hash = ?").bind(tokenHash).run().catch(() => {});
+  const forget = () =>
+    env.DB.prepare("DELETE FROM magic_links WHERE token_hash = ?")
+      .bind(tokenHash)
+      .run()
+      .catch((e) => console.error({ msg: "undelivered magic link cleanup failed", error: String(e) }));
   await sendEmail(env, {
     to: known.email,
     subject: invite ? `You're invited to ${workspaceName ?? "a support workspace"}` : "Your sign-in link",

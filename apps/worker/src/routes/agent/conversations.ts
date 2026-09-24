@@ -8,7 +8,7 @@ import { getAgentConversation, getAgentConversationRow, listInbox } from "../../
 import { getMembership, sessionTag } from "../../services/agents";
 import { getCookie } from "hono/cookie";
 import { SESSION_COOKIE } from "../../middleware/agent";
-import { claimCsatRequest, getMessageByClientId, insertMessage, listMessages } from "../../services/conversations";
+import { claimCsatRequest, getMessageByClientId, insertMessage, listMessages, LAST_MESSAGE_RESYNC_SQL, reopenWithNotice, undoReopen } from "../../services/conversations";
 import { afterResponse, bestEffort, conversationChanged } from "../../services/events";
 import { presentMessage, presentMessages, storeAttachment } from "../../services/attachments";
 import { EMAIL_DELAY_SECONDS } from "../../notifications/consumer";
@@ -40,19 +40,10 @@ export const agentConversationRoutes = new Hono<AppBindings>()
     // Replying to a resolved conversation reopens it. Do it (and write the "Reopened" notice)
     // before inserting the reply, so the thread reads notice → reply and the reply is the
     // conversation's last message (the inbox preview). Retries skip this.
-    let reopenedNotice: Message | null = null;
-    if (row.status === "resolved" && !(await getMessageByClientId(c.env.DB, row.id, body.clientId))) {
-      // Conditional: two concurrent replies can't both reopen it.
-      const reopenedRow = await c.env.DB.prepare("UPDATE conversations SET status = 'open' WHERE id = ? AND status = 'resolved' RETURNING id")
-        .bind(row.id)
-        .first();
-      if (reopenedRow) {
-        ({ message: reopenedNotice } = await insertMessage(c.env.DB, {
-          conversationId: row.id, workspaceId, authorType: "system", authorId: null, clientId: null, body: "", systemEvent: "reopened",
-        }));
-      }
-    }
-    const reopened = reopenedNotice !== null;
+    const reopenedNotice =
+      row.status === "resolved" && !(await getMessageByClientId(c.env.DB, row.id, body.clientId))
+        ? await reopenWithNotice(c.env.DB, row.id, workspaceId)
+        : null;
 
     let inserted: Awaited<ReturnType<typeof insertMessage>>;
     try {
@@ -64,51 +55,61 @@ export const agentConversationRoutes = new Hono<AppBindings>()
         clientId: body.clientId,
         body: body.body,
         attachmentIds: body.attachmentIds,
-        // Replying claims an unassigned conversation and counts as reading it (atomic with the reply).
+        // Replying claims an unassigned conversation and counts as reading it (atomic with the
+        // reply). RETURNING gives the stored status/assignee for the events below.
         extra: [
-          c.env.DB.prepare("UPDATE conversations SET assignee_id = COALESCE(assignee_id, ?), agent_last_read_at = MAX(agent_last_read_at, ?) WHERE id = ?").bind(
-            agent.id,
-            Date.now(),
-            row.id,
-          ),
+          c.env.DB.prepare(
+            "UPDATE conversations SET assignee_id = COALESCE(assignee_id, ?), agent_last_read_at = MAX(agent_last_read_at, ?) WHERE id = ? RETURNING status, assignee_id",
+          ).bind(agent.id, Date.now(), row.id),
         ],
       });
     } catch (err) {
       // The reply wasn't saved (e.g. a bad attachment): undo the reopen, or the conversation would
       // stay open with an orphan notice that no client was ever told about.
       if (reopenedNotice) {
-        const noticeId = reopenedNotice.id;
-        await bestEffort("undo reopen", () =>
-          c.env.DB.batch([
-            c.env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(noticeId),
-            c.env.DB.prepare(
-              "UPDATE conversations SET status = 'resolved', last_message_id = (SELECT MAX(id) FROM messages WHERE conversation_id = ?1), last_message_at = COALESCE((SELECT MAX(created_at) FROM messages WHERE conversation_id = ?1), last_message_at) WHERE id = ?1 AND status = 'open'",
-            ).bind(row.id),
-          ]),
-        );
+        const undone = await undoReopen(c.env.DB, row.id, reopenedNotice.id).catch((e) => {
+          console.error({ msg: "undo reopen failed", conversationId: row.id, error: String(e) });
+          return false;
+        });
+        // The reopen stands (something happened after it): tell clients, or they'd keep showing
+        // the conversation as resolved.
+        if (!undone) {
+          await afterResponse(c, async () => {
+            await bestEffort("realtime", async () => {
+              await publishToConversation(c.env, row.id, { type: "message.created", message: reopenedNotice });
+              await publishToConversation(c.env, row.id, { type: "status.changed", status: "open", assigneeId: row.assignee_id });
+            });
+            await bestEffort("inbox update", () => conversationChanged(c.env, workspaceId, row.id));
+          });
+        }
       }
       throw err;
     }
-    const { message, created } = inserted;
+    const { message, created, extraResults } = inserted;
     if (created) {
-      const assigneeId = row.assignee_id ?? agent.id;
-      // Everything below is best-effort: the reply is saved, and a client retry (created: false)
-      // would skip this block, so a failure here must not turn into a 500.
-      await bestEffort("notifications", () =>
-        c.env.NOTIFICATIONS.sendBatch([
-          { body: { type: "agent_reply", workspaceId, conversationId: row.id, messageId: message.id } },
-          {
-            body: { type: "email_digest", workspaceId, conversationId: row.id, since: message.createdAt },
-            delaySeconds: EMAIL_DELAY_SECONDS,
-          },
-        ]),
-      );
+      // Publish what's stored, not what was read before the insert: another agent may have
+      // assigned it or a concurrent reply may have reopened it meanwhile.
+      const stored = (extraResults[0]?.results[0] as { status: ConversationStatus; assignee_id: string | null } | undefined) ?? {
+        status: reopenedNotice ? "open" : row.status,
+        assignee_id: row.assignee_id ?? agent.id,
+      };
+      // Everything below is best-effort and runs after the response: the reply is saved, and a
+      // client retry (created: false) would skip it, so a failure here must not turn into a 500.
       await afterResponse(c, async () => {
+        await bestEffort("notifications", () =>
+          c.env.NOTIFICATIONS.sendBatch([
+            { body: { type: "agent_reply", workspaceId, conversationId: row.id, messageId: message.id } },
+            {
+              body: { type: "email_digest", workspaceId, conversationId: row.id, since: message.createdAt },
+              delaySeconds: EMAIL_DELAY_SECONDS,
+            },
+          ]),
+        );
         await bestEffort("realtime", async () => {
           if (reopenedNotice) await publishToConversation(c.env, row.id, { type: "message.created", message: reopenedNotice });
           await publishToConversation(c.env, row.id, { type: "message.created", message });
-          if (reopened || assigneeId !== row.assignee_id) {
-            await publishToConversation(c.env, row.id, { type: "status.changed", status: reopened ? "open" : row.status, assigneeId });
+          if (stored.status !== row.status || stored.assignee_id !== row.assignee_id) {
+            await publishToConversation(c.env, row.id, { type: "status.changed", status: stored.status, assigneeId: stored.assignee_id });
           }
         });
         await bestEffort("inbox update", () => conversationChanged(c.env, workspaceId, row.id));
@@ -153,14 +154,29 @@ export const agentConversationRoutes = new Hono<AppBindings>()
         .first<{ status: ConversationStatus }>();
       if (changed) {
         status = changed.status;
-        if (body.status === "resolved") {
-          await addSystem("resolved");
-          if (row.csat_score === null) {
-            const ws = await c.env.DB.prepare("SELECT csat_enabled FROM workspaces WHERE id = ?").bind(workspaceId).first<{ csat_enabled: number }>();
-            if (ws?.csat_enabled && (await claimCsatRequest(c.env.DB, row.id))) await addSystem("csat_request");
+        let csatClaimed = false;
+        const firstNotice = systemMessages.length;
+        try {
+          if (body.status === "resolved") {
+            await addSystem("resolved");
+            if (row.csat_score === null) {
+              const ws = await c.env.DB.prepare("SELECT csat_enabled FROM workspaces WHERE id = ?").bind(workspaceId).first<{ csat_enabled: number }>();
+              csatClaimed = !!ws?.csat_enabled && (await claimCsatRequest(c.env.DB, row.id));
+              if (csatClaimed) await addSystem("csat_request");
+            }
+          } else if (row.status === "resolved") {
+            await addSystem("reopened");
           }
-        } else if (row.status === "resolved") {
-          await addSystem("reopened");
+        } catch (err) {
+          // Undo the transition so a retry redoes it with its notices (and the rating request):
+          // otherwise the retry sees the status already set and skips them for good.
+          await c.env.DB.batch([
+            c.env.DB.prepare("UPDATE conversations SET status = ? WHERE id = ? AND status = ?").bind(row.status, row.id, body.status),
+            ...(csatClaimed ? [c.env.DB.prepare("UPDATE conversations SET csat_requested_at = NULL WHERE id = ?").bind(row.id)] : []),
+            ...systemMessages.slice(firstNotice).map((m) => c.env.DB.prepare("DELETE FROM messages WHERE id = ?").bind(m.id)),
+            c.env.DB.prepare(LAST_MESSAGE_RESYNC_SQL).bind(row.id),
+          ]).catch((e) => console.error({ msg: "status revert failed", conversationId: row.id, error: String(e) }));
+          throw err;
         }
       } else {
         status = (await getAgentConversationRow(c.env.DB, workspaceId, row.id)).status;
