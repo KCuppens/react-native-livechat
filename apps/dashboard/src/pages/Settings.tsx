@@ -2,28 +2,24 @@ import type { AgentMe, CannedReply, OfficeHours, UpdateWorkspaceSettingsRequest,
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Member } from "../api";
 import { attempt, Avatar, Field, Spinner, toast, useBusy } from "../components/ui";
+import { formatDate, t as translateNow, useI18n, withNodes, type DashKey } from "../i18n";
 import { useRouter } from "../router";
 
-const TABS = [
-  ["general", "General"],
-  ["hours", "Office hours"],
-  ["install", "Install"],
-  ["push", "Push notifications"],
-  ["team", "Team"],
-  ["canned", "Saved replies"],
-] as const;
+const TABS = ["general", "hours", "install", "push", "team", "canned"] as const;
 
-const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** Weekday names in the dashboard language, Sunday first (day 0, as office hours store it). 2023-01-01 was a Sunday. */
+const dayNames = (locale: string) => Array.from({ length: 7 }, (_, day) => new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(Date.UTC(2023, 0, 1 + day)));
 /**
  * ~420 zones; computed once, not on every keystroke in the office-hours form. "UTC" (the
  * default) isn't in V8's list, so it's added explicitly.
  */
 const TIMEZONES = [...new Set(["UTC", ...(typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [])])];
 
-const LANGUAGES: Record<string, string> = { en: "English", nl: "Nederlands", fr: "Français", de: "Deutsch", es: "Español", it: "Italiano", pt: "Português" };
+const LANGUAGES: Record<string, string> = { en: "English", nl: "Nederlands", fr: "Français", de: "Deutsch", es: "Español", it: "Italiano", pt: "Português", ja: "日本語", ko: "한국어" };
 
 export function SettingsPage({ me, workspaceId, isAdmin, tab }: { me: AgentMe; workspaceId: string; isAdmin: boolean; tab: string }) {
   const { navigate } = useRouter();
+  const { t } = useI18n();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -36,31 +32,31 @@ export function SettingsPage({ me, workspaceId, isAdmin, tab }: { me: AgentMe; w
   const save = async (patch: UpdateWorkspaceSettingsRequest) => {
     await attempt(async () => {
       setSettings(await api.updateSettings(workspaceId, patch));
-      toast("Saved");
-    }, "Save failed");
+      toast(translateNow("common.saved"));
+    }, translateNow("common.saveFailed"));
   };
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Settings</h1>
+        <h1>{t("nav.settings")}</h1>
       </div>
       <div className="tabs" role="tablist">
-        {TABS.map(([id, label]) => (
+        {TABS.map((id) => (
           <button type="button" key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => navigate(`/w/${workspaceId}/settings/${id}`)}>
-            {label}
+            {t(`settings.tab.${id}`)}
           </button>
         ))}
       </div>
-      {!isAdmin && tab !== "canned" && <p className="muted">Only workspace admins can change these settings.</p>}
+      {!isAdmin && tab !== "canned" && <p className="muted">{t("settings.adminOnly")}</p>}
       {!settings ? (
-        loadFailed ? <LoadFailed what="settings" onRetry={() => setReloadNonce((n) => n + 1)} /> : <Spinner />
+        loadFailed ? <LoadFailed message={t("settings.loadFailed")} onRetry={() => setReloadNonce((n) => n + 1)} /> : <Spinner />
       ) : (
         <fieldset disabled={!isAdmin && tab !== "canned"} style={{ border: 0, padding: 0, margin: 0, maxWidth: 820 }}>
           {tab === "general" && <GeneralTab settings={settings} save={save} />}
           {tab === "hours" && <HoursTab settings={settings} save={save} />}
           {tab === "install" && <InstallTab settings={settings} save={save} workspaceId={workspaceId} />}
-          {tab === "push" && <PushTab settings={settings} workspaceId={workspaceId} reload={() => void attempt(async () => setSettings(await api.settings(workspaceId)), "Couldn't reload settings")} />}
+          {tab === "push" && <PushTab settings={settings} workspaceId={workspaceId} reload={() => void attempt(async () => setSettings(await api.settings(workspaceId)), t("settings.reloadFailed"))} />}
           {tab === "team" && <TeamTab workspaceId={workspaceId} me={me} />}
           {tab === "canned" && <CannedTab workspaceId={workspaceId} />}
         </fieldset>
@@ -88,23 +84,24 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
   const [defaultLocale, setDefaultLocale] = useState(settings.defaultLocale);
   const [greeting, setGreeting] = useState(settings.greeting);
   const [csat, setCsat] = useState(settings.csatEnabled);
+  const { t } = useI18n();
   return (
     <>
-      <Card title="Branding" description="How the help center and chat look inside your app.">
-        <Field label="Name">
+      <Card title={t("general.branding")} description={t("general.brandingIntro")}>
+        <Field label={t("common.name")}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Brand color">
+        <Field label={t("general.brandColor")}>
           <div className="row">
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label="Brand color picker" />
-            <input className="input" aria-label="Brand color hex" value={color} onChange={(e) => setColor(e.target.value)} style={{ maxWidth: 120 }} />
+            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label={t("general.brandColorPicker")} />
+            <input className="input" aria-label={t("general.brandColorHex")} value={color} onChange={(e) => setColor(e.target.value)} style={{ maxWidth: 120 }} />
           </div>
         </Field>
-        <Field label="Logo URL" hint="HTTPS image shown at the top of the help center.">
+        <Field label={t("general.logoUrl")} hint={t("general.logoHint")}>
           <input className="input" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://…" />
         </Field>
       </Card>
-      <Card title="Languages" description="The UI follows the device language when it's enabled here; articles fall back to the default language.">
+      <Card title={t("general.languages")} description={t("general.languagesIntro")}>
         <div className="row" style={{ flexWrap: "wrap", marginBottom: 14 }}>
           {Object.entries(LANGUAGES).map(([code, label]) => (
             <label key={code} className="row" style={{ marginRight: 12 }}>
@@ -123,7 +120,7 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
             </label>
           ))}
         </div>
-        <Field label="Default language">
+        <Field label={t("general.defaultLanguage")}>
           <select className="select" value={defaultLocale} onChange={(e) => setDefaultLocale(e.target.value)} style={{ maxWidth: 240 }}>
             {locales.map((l) => (
               <option key={l} value={l}>
@@ -133,15 +130,15 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
           </select>
         </Field>
         {locales.map((l) => (
-          <Field key={l} label={`Greeting (${l})`} hint="Leave empty to use the built-in greeting.">
+          <Field key={l} label={t("general.greeting", { locale: l })} hint={t("general.greetingHint")}>
             <input className="input" value={greeting[l] ?? ""} onChange={(e) => setGreeting({ ...greeting, [l]: e.target.value })} />
           </Field>
         ))}
       </Card>
-      <Card title="Satisfaction ratings">
+      <Card title={t("general.csatTitle")}>
         <label className="row">
           <input type="checkbox" checked={csat} onChange={(e) => setCsat(e.target.checked)} />
-          Ask customers to rate the conversation when it's resolved
+          {t("general.csatAsk")}
         </label>
       </Card>
       <button type="button"
@@ -159,7 +156,7 @@ function GeneralTab({ settings, save }: { settings: WorkspaceSettings; save: (p:
           }))
         }
       >
-        {saving ? "Saving…" : "Save changes"}
+        {saving ? t("common.saving") : t("common.saveChanges")}
       </button>
     </>
   );
@@ -170,6 +167,8 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
   const [autoReply, setAutoReply] = useState(settings.autoReply);
   const [typical, setTypical] = useState(settings.typicalReplyMinutes?.toString() ?? "");
   const [saving, run] = useBusy();
+  const { t, locale } = useI18n();
+  const days = useMemo(() => dayNames(locale), [locale]);
   // A saved zone the browser doesn't list must still show as selected (not silently the first one).
   const timezoneOptions = useMemo(
     () => (TIMEZONES.includes(settings.officeHours.timezone) ? TIMEZONES : [settings.officeHours.timezone, ...TIMEZONES]).map((tz) => <option key={tz}>{tz}</option>),
@@ -181,44 +180,44 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
 
   return (
     <>
-      <Card title="Office hours" description="Outside these hours customers see that you're away and get your auto-reply.">
+      <Card title={t("settings.tab.hours")} description={t("hours.intro")}>
         <label className="row" style={{ marginBottom: 14 }}>
           <input type="checkbox" checked={hours.enabled} onChange={(e) => setHours({ ...hours, enabled: e.target.checked })} />
-          Use office hours (otherwise you always show as online)
+          {t("hours.enable")}
         </label>
-        <Field label="Timezone">
+        <Field label={t("hours.timezone")}>
           <select className="select" value={hours.timezone} onChange={(e) => setHours({ ...hours, timezone: e.target.value })} style={{ maxWidth: 320 }}>
             {timezoneOptions}
           </select>
         </Field>
-        {DAYS.map((label, day) => {
+        {days.map((label, day) => {
           const w = windowFor(day);
           return (
             <div className="hours-grid" key={label}>
               <span>{label}</span>
               <label className="row">
                 <input type="checkbox" checked={!!w} onChange={(e) => setDay(day, e.target.checked ? { open: "09:00", close: "17:00" } : null)} />
-                Open
+                {t("hours.open")}
               </label>
               {w ? (
                 <div className="row">
-                  <input className="input" type="time" value={w.open} onChange={(e) => setDay(day, { ...w, open: e.target.value })} aria-label={`${label} opens`} />
+                  <input className="input" type="time" value={w.open} onChange={(e) => setDay(day, { ...w, open: e.target.value })} aria-label={t("hours.opens", { day: label })} />
                   –
-                  <input className="input" type="time" value={w.close} onChange={(e) => setDay(day, { ...w, close: e.target.value })} aria-label={`${label} closes`} />
+                  <input className="input" type="time" value={w.close} onChange={(e) => setDay(day, { ...w, close: e.target.value })} aria-label={t("hours.closes", { day: label })} />
                 </div>
               ) : (
-                <span className="muted">Closed</span>
+                <span className="muted">{t("hours.closed")}</span>
               )}
             </div>
           );
         })}
       </Card>
-      <Card title="Reply time & auto-reply">
-        <Field label="Typical reply time (minutes)" hint="Shown to customers while you're online. Leave empty to hide.">
+      <Card title={t("hours.replyTitle")}>
+        <Field label={t("hours.typical")} hint={t("hours.typicalHint")}>
           <input className="input" type="number" min={1} value={typical} onChange={(e) => setTypical(e.target.value)} style={{ maxWidth: 120 }} />
         </Field>
         {settings.locales.map((l) => (
-          <Field key={l} label={`Away message (${l})`} hint="Sent automatically when someone writes outside office hours (at most once per 12h per conversation).">
+          <Field key={l} label={t("hours.away", { locale: l })} hint={t("hours.awayHint")}>
             <textarea className="textarea" value={autoReply[l] ?? ""} onChange={(e) => setAutoReply({ ...autoReply, [l]: e.target.value })} />
           </Field>
         ))}
@@ -234,7 +233,7 @@ function HoursTab({ settings, save }: { settings: WorkspaceSettings; save: (p: U
           }))
         }
       >
-        {saving ? "Saving…" : "Save changes"}
+        {saving ? t("common.saving") : t("common.saveChanges")}
       </button>
     </>
   );
@@ -245,14 +244,15 @@ function InstallTab({ settings, save, workspaceId }: { settings: WorkspaceSettin
   const [secret, setSecret] = useState<string | null>(null);
   const [saving, run] = useBusy();
   const apiUrl = location.origin;
+  const { t } = useI18n();
   return (
     <>
-      <Card title="Keys">
-        <Field label="Publishable key" hint="Safe to ship in your app and website.">
+      <Card title={t("install.keys")}>
+        <Field label={t("install.publishableKey")} hint={t("install.publishableHint")}>
           <input className="input" readOnly value={settings.publishableKey} onFocus={(e) => e.target.select()} />
         </Field>
         {secret ? (
-          <Field label="Identity secret" hint="Keep this on your server. Use it to sign user ids so chats are tied to logged-in users.">
+          <Field label={t("install.identitySecret")} hint={t("install.secretHint")}>
             <input className="input" readOnly value={secret} onFocus={(e) => e.target.select()} />
           </Field>
         ) : (
@@ -260,25 +260,25 @@ function InstallTab({ settings, save, workspaceId }: { settings: WorkspaceSettin
           // the label text would trigger the rotate prompt.
           // biome-ignore lint/a11y/useSemanticElements: a <fieldset> would bring its own border/legend styling into this form row
           <div className="field" role="group" aria-labelledby="identity-secret-label">
-            <span id="identity-secret-label">Identity secret</span>
+            <span id="identity-secret-label">{t("install.identitySecret")}</span>
             <div className="row">
-              <span className="muted">Hidden. Rotating it immediately invalidates existing user hashes.</span>
+              <span className="muted">{t("install.secretHidden")}</span>
               <button type="button"
                 className="btn btn-sm btn-danger"
                 onClick={async () => {
-                  if (!confirm("Rotate the identity secret? Your server must switch to the new secret right away.")) return;
-                  await attempt(async () => setSecret((await api.rotateIdentitySecret(workspaceId)).identitySecret), "Couldn't rotate the secret");
+                  if (!confirm(t("install.rotateConfirm"))) return;
+                  await attempt(async () => setSecret((await api.rotateIdentitySecret(workspaceId)).identitySecret), t("install.rotateFailed"));
                 }}
               >
-                Rotate secret
+                {t("install.rotate")}
               </button>
             </div>
-            <small>Keep this on your server. Use it to sign user ids so chats are tied to logged-in users.</small>
+            <small>{t("install.secretHint")}</small>
           </div>
         )}
       </Card>
-      <Card title="Allowed websites" description="Origins allowed to use the web widget (one per line, e.g. https://app.example.com). Use * to allow any. Mobile apps don't need this.">
-        <textarea className="textarea" aria-label="Allowed websites" value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://app.example.com" />
+      <Card title={t("install.origins")} description={t("install.originsIntro")}>
+        <textarea className="textarea" aria-label={t("install.origins")} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://app.example.com" />
         <button
           type="button"
           className="btn"
@@ -286,7 +286,7 @@ function InstallTab({ settings, save, workspaceId }: { settings: WorkspaceSettin
           disabled={saving}
           onClick={() => void run(() => save({ allowedOrigins: origins.split(/\s+/).filter(Boolean) }))}
         >
-          {saving ? "Saving…" : "Save origins"}
+          {saving ? t("common.saving") : t("install.saveOrigins")}
         </button>
       </Card>
       <Card title="React Native">
@@ -299,7 +299,7 @@ import { LiveChatProvider, SupportScreen } from "@kobecuppens/livechat-react-nat
   <App />
 </LiveChatProvider>`}</div>
       </Card>
-      <Card title="React (web)">
+      <Card title={t("install.reactWeb")}>
         <div className="code">{`npm i @kobecuppens/livechat-react
 
 import { LiveChatProvider, LiveChatWidget } from "@kobecuppens/livechat-react";
@@ -309,11 +309,11 @@ import { LiveChatProvider, LiveChatWidget } from "@kobecuppens/livechat-react";
   <LiveChatWidget />
 </LiveChatProvider>`}</div>
       </Card>
-      <Card title="Any website">
+      <Card title={t("install.anyWebsite")}>
         <div className="code">{`<script src="https://cdn.jsdelivr.net/npm/@kobecuppens/livechat-widget/dist/widget.js"
   data-api-url="${apiUrl}" data-workspace-key="${settings.publishableKey}" async></script>`}</div>
       </Card>
-      <Card title="Verify users (server-side)" description="Compute the user hash on your server and pass it with the user id.">
+      <Card title={t("install.verifyUsers")} description={t("install.verifyIntro")}>
         <div className="code">{`// Node
 crypto.createHmac("sha256", process.env.LIVECHAT_IDENTITY_SECRET).update(user.id).digest("hex")
 
@@ -330,49 +330,51 @@ hash_hmac('sha256', $userId, $secret)`}</div>
 function PushTab({ settings, workspaceId, reload }: { settings: WorkspaceSettings; workspaceId: string; reload: () => void }) {
   const [fcm, setFcm] = useState("");
   const [apns, setApns] = useState({ keyP8: "", keyId: "", teamId: "" });
+  const { t } = useI18n();
   const readFile = (file: File | undefined, set: (text: string) => void) => file?.text().then(set);
   const run = async (fn: () => Promise<void>) => {
     await attempt(async () => {
       await fn();
-      toast("Saved");
+      toast(t("common.saved"));
       reload();
-    }, "Failed");
+    }, t("common.failed"));
   };
-  const status = (at: number | null) => (at ? <span className="badge badge-open">Configured {new Date(at).toLocaleDateString()}</span> : <span className="badge">Not configured</span>);
+  const status = (at: number | null) =>
+    at ? <span className="badge badge-open">{t("push.configured", { date: formatDate(at) })}</span> : <span className="badge">{t("push.notConfigured")}</span>;
   return (
     <>
-      <Card title="Android (Firebase Cloud Messaging)" description={<>Upload a Firebase service account JSON with the Cloud Messaging permission. {status(settings.push.fcmUpdatedAt)}</>}>
-        <input type="file" aria-label="Firebase service account JSON" accept="application/json,.json" onChange={(e) => void readFile(e.target.files?.[0], setFcm)} />
+      <Card title={t("push.fcmTitle")} description={<>{t("push.fcmIntro")} {status(settings.push.fcmUpdatedAt)}</>}>
+        <input type="file" aria-label={t("push.fcmFile")} accept="application/json,.json" onChange={(e) => void readFile(e.target.files?.[0], setFcm)} />
         <div className="row" style={{ marginTop: 10 }}>
           <button type="button" className="btn btn-primary" disabled={!fcm} onClick={() => void run(() => api.saveFcm(workspaceId, fcm))}>
-            Save FCM credentials
+            {t("push.saveFcm")}
           </button>
           {settings.push.fcmUpdatedAt && (
             <button type="button" className="btn btn-danger" onClick={() => void run(() => api.deletePush(workspaceId, "fcm"))}>
-              Remove
+              {t("common.remove")}
             </button>
           )}
         </div>
       </Card>
-      <Card title="iOS (Apple Push Notification service)" description={<>Create an APNs auth key (.p8) in your Apple developer account. {status(settings.push.apnsUpdatedAt)}</>}>
-        <Field label=".p8 key file">
+      <Card title={t("push.apnsTitle")} description={<>{t("push.apnsIntro")} {status(settings.push.apnsUpdatedAt)}</>}>
+        <Field label={t("push.p8File")}>
           <input type="file" accept=".p8" onChange={(e) => void readFile(e.target.files?.[0], (keyP8) => setApns((a) => ({ ...a, keyP8 })))} />
         </Field>
         <div className="row">
-          <Field label="Key ID">
+          <Field label={t("push.keyId")}>
             <input className="input" value={apns.keyId} onChange={(e) => setApns({ ...apns, keyId: e.target.value.trim() })} placeholder="ABC123DEFG" />
           </Field>
-          <Field label="Team ID">
+          <Field label={t("push.teamId")}>
             <input className="input" value={apns.teamId} onChange={(e) => setApns({ ...apns, teamId: e.target.value.trim() })} placeholder="TEAM123456" />
           </Field>
         </div>
         <div className="row">
           <button type="button" className="btn btn-primary" disabled={!apns.keyP8 || !apns.keyId || !apns.teamId} onClick={() => void run(() => api.saveApns(workspaceId, apns))}>
-            Save APNs credentials
+            {t("push.saveApns")}
           </button>
           {settings.push.apnsUpdatedAt && (
             <button type="button" className="btn btn-danger" onClick={() => void run(() => api.deletePush(workspaceId, "apns"))}>
-              Remove
+              {t("common.remove")}
             </button>
           )}
         </div>
@@ -388,16 +390,17 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
   const [role, setRole] = useState<"agent" | "admin">("agent");
   const [loadFailed, setLoadFailed] = useState(false);
   const [inviting, run] = useBusy();
+  const { t } = useI18n();
   const reload = useCallback(async () => {
     setLoadFailed(false);
-    if (!(await attempt(async () => setMembers(await api.members(workspaceId)), "Couldn't load members"))) setLoadFailed(true);
+    if (!(await attempt(async () => setMembers(await api.members(workspaceId)), translateNow("team.loadFailedToast")))) setLoadFailed(true);
   }, [workspaceId]);
   useEffect(() => {
     void reload();
   }, [reload]);
   return (
     <>
-      <Card title="Invite a teammate" description="They'll get an email with a sign-in link.">
+      <Card title={t("team.invite")} description={t("team.inviteIntro")}>
         <form
           className="row"
           style={{ alignItems: "flex-end", flexWrap: "wrap" }}
@@ -408,32 +411,32 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
                 const added = await api.invite(workspaceId, { email: email.trim(), name: name.trim() || undefined, role });
                 setEmail("");
                 setName("");
-                toast(added.inviteEmailSent ? "Invite sent" : "Added. No email sent: this address got several sign-in emails recently. They can use one of those.");
+                toast(added.inviteEmailSent ? t("team.inviteSent") : t("team.inviteNoEmail"));
                 void reload();
-              }, "Invite failed"),
+              }, t("team.inviteFailed")),
             );
           }}
         >
-          <Field label="Email">
+          <Field label={t("common.email")}>
             <input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
-          <Field label="Name">
+          <Field label={t("common.name")}>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Role">
+          <Field label={t("team.role")}>
             <select className="select" value={role} onChange={(e) => setRole(e.target.value as "agent" | "admin")}>
-              <option value="agent">Agent</option>
-              <option value="admin">Admin</option>
+              <option value="agent">{t("team.role.agent")}</option>
+              <option value="admin">{t("team.role.admin")}</option>
             </select>
           </Field>
           <button type="submit" className="btn btn-primary" style={{ marginBottom: 14 }} disabled={inviting}>
-            {inviting ? "Sending…" : "Send invite"}
+            {inviting ? t("common.sending") : t("team.sendInvite")}
           </button>
         </form>
       </Card>
-      <Card title="Members">
+      <Card title={t("team.members")}>
         {!members && loadFailed ? (
-          <LoadFailed what="members" onRetry={() => void reload()} />
+          <LoadFailed message={t("team.loadFailed")} onRetry={() => void reload()} />
         ) : !members ? (
           <Spinner />
         ) : (
@@ -445,20 +448,20 @@ function TeamTab({ workspaceId, me }: { workspaceId: string; me: AgentMe }) {
                     <Avatar name={m.name} url={m.avatarUrl} />
                   </td>
                   <td>
-                    <strong>{m.name}</strong> {m.online && <span className="badge badge-open">online</span>}
+                    <strong>{m.name}</strong> {m.online && <span className="badge badge-open">{t("team.online")}</span>}
                     <div className="muted">{m.email}</div>
                   </td>
-                  <td>{m.role}</td>
+                  <td>{t(`team.role.${m.role}` as DashKey)}</td>
                   <td style={{ textAlign: "right" }}>
                     {m.id !== me.agent.id && (
                       <button type="button"
                         className="btn btn-sm btn-danger"
                         onClick={async () => {
-                          if (!confirm(`Remove ${m.name}? Their conversations become unassigned.`)) return;
-                          if (await attempt(() => api.removeMember(workspaceId, m.id), "Couldn't remove member")) void reload();
+                          if (!confirm(t("team.removeConfirm", { name: m.name }))) return;
+                          if (await attempt(() => api.removeMember(workspaceId, m.id), t("team.removeFailed"))) void reload();
                         }}
                       >
-                        Remove
+                        {t("common.remove")}
                       </button>
                     )}
                   </td>
@@ -477,15 +480,19 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
   const [editing, setEditing] = useState<{ id: string | null; shortcut: string; title: string; body: string } | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [saving, run] = useBusy();
+  const { t } = useI18n();
   const reload = useCallback(async () => {
     setLoadFailed(false);
-    if (!(await attempt(async () => setItems(await api.canned(workspaceId)), "Couldn't load saved replies"))) setLoadFailed(true);
+    if (!(await attempt(async () => setItems(await api.canned(workspaceId)), translateNow("canned.loadFailedToast")))) setLoadFailed(true);
   }, [workspaceId]);
   useEffect(() => {
     void reload();
   }, [reload]);
   return (
-    <Card title="Saved replies" description={<>Type <code>/shortcut</code> in the composer to insert one. Use <code>{"{{name}}"}</code> for the customer's first name and <code>{"{{agent}}"}</code> for yours.</>}>
+    <Card
+      title={t("settings.tab.canned")}
+      description={withNodes(t("canned.intro"), { shortcut: <code>/shortcut</code>, name: <code>{"{{name}}"}</code>, agent: <code>{"{{agent}}"}</code> })}
+    >
       {editing ? (
         <form
           onSubmit={async (e) => {
@@ -495,38 +502,38 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
                 await api.saveCanned(workspaceId, editing.id, { shortcut: editing.shortcut, title: editing.title, body: editing.body });
                 setEditing(null);
                 void reload();
-              }, "Save failed"),
+              }, t("common.saveFailed")),
             );
           }}
         >
           <div className="row">
-            <Field label="Shortcut" hint="lowercase letters, numbers, dashes">
+            <Field label={t("canned.shortcut")} hint={t("canned.shortcutHint")}>
               <input className="input" required pattern="[a-z0-9-]{1,32}" value={editing.shortcut} onChange={(e) => setEditing({ ...editing, shortcut: e.target.value.toLowerCase() })} />
             </Field>
-            <Field label="Title">
+            <Field label={t("common.title")}>
               <input className="input" required value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} />
             </Field>
           </div>
-          <Field label="Message">
+          <Field label={t("canned.message")}>
             <textarea className="textarea" required value={editing.body} onChange={(e) => setEditing({ ...editing, body: e.target.value })} />
           </Field>
           <div className="row">
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("common.saving") : t("common.save")}
             </button>
             <button type="button" className="btn" onClick={() => setEditing(null)}>
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
         </form>
       ) : (
         <>
           {!items && loadFailed ? (
-            <LoadFailed what="saved replies" onRetry={() => void reload()} />
+            <LoadFailed message={t("canned.loadFailed")} onRetry={() => void reload()} />
           ) : !items ? (
             <Spinner />
           ) : items.length === 0 ? (
-            <div className="empty">No saved replies yet. Create one, then type its /shortcut in the reply box to insert it.</div>
+            <div className="empty">{t("canned.empty")}</div>
           ) : (
             <table className="table">
               <tbody>
@@ -543,16 +550,16 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
                     </td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button type="button" className="btn btn-sm" onClick={() => setEditing({ ...c })}>
-                        Edit
+                        {t("common.edit")}
                       </button>{" "}
                       <button type="button"
                         className="btn btn-sm btn-danger"
                         onClick={async () => {
-                          if (!confirm(`Delete the saved reply /${c.shortcut}?`)) return;
-                          if (await attempt(() => api.deleteCanned(workspaceId, c.id), "Couldn't delete saved reply")) void reload();
+                          if (!confirm(t("canned.deleteConfirm", { shortcut: c.shortcut }))) return;
+                          if (await attempt(() => api.deleteCanned(workspaceId, c.id), t("canned.deleteFailed"))) void reload();
                         }}
                       >
-                        Delete
+                        {t("common.delete")}
                       </button>
                     </td>
                   </tr>
@@ -561,7 +568,7 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
             </table>
           )}
           <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => setEditing({ id: null, shortcut: "", title: "", body: "" })}>
-            New saved reply
+            {t("canned.new")}
           </button>
         </>
       )}
@@ -569,12 +576,13 @@ function CannedTab({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function LoadFailed({ what, onRetry }: { what: string; onRetry: () => void }) {
+function LoadFailed({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="empty">
-      Couldn't load {what}.{" "}
+      {message}{" "}
       <button type="button" className="btn btn-sm" onClick={onRetry}>
-        Retry
+        {t("common.retry")}
       </button>
     </div>
   );

@@ -2,9 +2,11 @@ import type { CsatReport } from "@kobecuppens/livechat-protocol";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Spinner } from "../components/ui";
+import { t as translateNow, useI18n } from "../i18n";
 import { Link } from "../router";
 
 export function ReportsPage({ workspaceId }: { workspaceId: string }) {
+  const { t } = useI18n();
   const [days, setDays] = useState(30);
   const [report, setReport] = useState<CsatReport | null>(null);
   const [failed, setFailed] = useState(false);
@@ -27,18 +29,20 @@ export function ReportsPage({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Reports</h1>
-        <select className="select" style={{ width: 160 }} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Period">
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-          <option value={90}>Last 90 days</option>
+        <h1>{t("nav.reports")}</h1>
+        <select className="select" style={{ width: 160 }} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={t("reports.period")}>
+          {[7, 30, 90].map((d) => (
+            <option key={d} value={d}>
+              {t("reports.lastDays", { count: d })}
+            </option>
+          ))}
         </select>
       </div>
       {failed ? (
         <div className="empty">
-          Couldn't load the report.{" "}
+          {t("reports.loadFailed")}{" "}
           <button type="button" className="btn btn-sm" onClick={() => setAttemptNo((n) => n + 1)}>
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       ) : !report ? (
@@ -47,31 +51,31 @@ export function ReportsPage({ workspaceId }: { workspaceId: string }) {
         <>
           <div className="stat-grid">
             <div className="stat">
-              <span>Conversations</span>
+              <span>{t("reports.conversations")}</span>
               <strong>{report.conversations}</strong>
             </div>
             <div className="stat">
-              <span>Resolved</span>
+              <span>{t("reports.resolved")}</span>
               <strong>{report.resolved}</strong>
             </div>
             <div className="stat">
-              <span>Median first reply</span>
+              <span>{t("reports.medianReply")}</span>
               <strong>{report.medianFirstResponseMinutes === null ? "—" : formatMinutes(report.medianFirstResponseMinutes)}</strong>
             </div>
             <div className="stat">
-              <span>Satisfaction</span>
+              <span>{t("reports.satisfaction")}</span>
               <strong>{report.average === null ? "—" : `${report.average.toFixed(1)} / 5`}</strong>
-              <span>{report.responses} ratings</span>
+              <span>{t("reports.ratingsCount", { count: report.responses })}</span>
             </div>
           </div>
           <div className="card">
-            <h2 style={{ marginBottom: 12 }}>Ratings</h2>
+            <h2 style={{ marginBottom: 12 }}>{t("reports.ratings")}</h2>
             {[5, 4, 3, 2, 1].map((score) => {
               const n = report.distribution[score - 1]!;
               return (
                 <div className="bar-row" key={score}>
                   <span>{score} ★</span>
-                  <div className="bar" role="img" aria-label={`${n} ratings of ${score}`}>
+                  <div className="bar" role="img" aria-label={t("reports.barLabel", { count: n, score })}>
                     <i style={{ width: `${(n / max) * 100}%` }} />
                   </div>
                   <span className="muted">{n}</span>
@@ -80,9 +84,9 @@ export function ReportsPage({ workspaceId }: { workspaceId: string }) {
             })}
           </div>
           <div className="card">
-            <h2 style={{ marginBottom: 12 }}>Recent comments</h2>
+            <h2 style={{ marginBottom: 12 }}>{t("reports.recentComments")}</h2>
             {report.recentComments.length === 0 ? (
-              <p className="muted">No comments yet.</p>
+              <p className="muted">{t("reports.noComments")}</p>
             ) : (
               <table className="table">
                 <tbody>
@@ -91,7 +95,7 @@ export function ReportsPage({ workspaceId }: { workspaceId: string }) {
                       <td style={{ width: 90 }}>{"★".repeat(c.score)}</td>
                       <td>“{c.comment}”</td>
                       <td style={{ textAlign: "right" }}>
-                        <Link to={`/w/${workspaceId}/inbox/${c.conversationId}`}>Open</Link>
+                        <Link to={`/w/${workspaceId}/inbox/${c.conversationId}`}>{t("common.openLink")}</Link>
                       </td>
                     </tr>
                   ))}
@@ -106,8 +110,8 @@ export function ReportsPage({ workspaceId }: { workspaceId: string }) {
 }
 
 function formatMinutes(m: number) {
-  if (m < 1) return "<1m";
-  if (m < 60) return `${Math.round(m)}m`;
-  if (m < 1440) return `${Math.round(m / 60)}h`;
-  return `${Math.round(m / 1440)}d`;
+  if (m < 1) return translateNow("time.lessThanMinute");
+  if (m < 60) return translateNow("time.minutes", { n: Math.round(m) });
+  if (m < 1440) return translateNow("time.hours", { n: Math.round(m / 60) });
+  return translateNow("time.days", { n: Math.round(m / 1440) });
 }

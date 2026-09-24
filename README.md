@@ -29,7 +29,8 @@ examples/
 - Before a chat starts, articles matching what the customer is typing are suggested (deflection).
 - Chat with optimistic sending and retry, image/PDF attachments, typing indicators, read receipts ("Seen"), an unread badge, an auto-reply outside office hours, and a rating card when the conversation is resolved.
 - Push (FCM/APNs) when the app isn't showing the conversation, and an email digest if a reply is still unread after 10 minutes (verified users only, since anonymous visitors can type any address).
-- UI in English, Dutch and French. It follows the device language when the workspace supports it; articles fall back to the workspace's default language.
+- UI in English, German, Spanish, French, Japanese, Korean and Dutch. It follows the device language when the workspace supports it; articles fall back to the workspace's default language.
+- The agent dashboard comes in the same seven languages. It starts in the browser's language, and each agent can switch it from the sidebar or the sign-in page.
 
 ## What agents get
 

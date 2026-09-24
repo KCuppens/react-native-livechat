@@ -1,10 +1,14 @@
+import { de } from "./locales/de";
 import { en, type StringKey, type Strings } from "./locales/en";
+import { es } from "./locales/es";
 import { fr } from "./locales/fr";
+import { ja } from "./locales/ja";
+import { ko } from "./locales/ko";
 import { nl } from "./locales/nl";
 
 export type { StringKey, Strings };
 
-const BUILT_IN: Record<string, Strings> = { en, nl, fr };
+const BUILT_IN: Record<string, Strings> = { en, de, es, fr, ja, ko, nl };
 
 export type StringOverrides = Record<string, Partial<Strings>>;
 
@@ -31,9 +35,21 @@ export function negotiateLocale(preferred: string | undefined, supported: string
 
 export type Translate = (key: StringKey, vars?: Record<string, string | number>) => string;
 
+/**
+ * CLDR plural category for a count. Intl.PluralRules when available; Hermes (React Native)
+ * doesn't implement it, so fall back to the rules of the built-in languages there (fr counts 0
+ * and 1 as "one"; ja and ko have no singular; en, de, es and nl only 1).
+ */
+function pluralRules(locale: string): { select: (count: number) => string } {
+  if (typeof Intl !== "undefined" && typeof Intl.PluralRules === "function") return new Intl.PluralRules(locale);
+  const base = locale.split("-")[0];
+  if (base === "ja" || base === "ko") return { select: () => "other" };
+  return { select: (count) => (count === 1 || (base === "fr" && count === 0) ? "one" : "other") };
+}
+
 export function createTranslator(locale: string, overrides: StringOverrides = {}): Translate {
   const chain = localeChain(locale);
-  const plurals = new Intl.PluralRules(locale);
+  const plurals = pluralRules(locale);
   const lookup = (key: string): string | undefined => {
     for (const l of chain) {
       const hit = (overrides[l] as Record<string, string> | undefined)?.[key] ?? (BUILT_IN[l] as Record<string, string> | undefined)?.[key];

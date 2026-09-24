@@ -3,6 +3,7 @@ import type { AgentConversation, AgentMe, Attachment, ConversationStatus, Messag
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { attempt, toast } from "../components/ui";
+import { t } from "../i18n";
 import { mergeById } from "./format";
 
 export interface PendingMsg {
@@ -122,7 +123,7 @@ export function useConversationThread(
       const page = await api.messages(workspaceId, conversationId, older);
       setMessages((prev) => mergeById(prev, page.items));
       setOlder(page.nextCursor);
-    }, "Couldn't load earlier messages");
+    }, t("thread.loadEarlierFailed"));
     setLoadingOlder(false);
   };
 
@@ -152,7 +153,7 @@ export function useConversationThread(
     try {
       setConversation(await api.updateConversation(workspaceId, conversationId, body));
     } catch {
-      toast("Update failed");
+      toast(t("thread.updateFailed"));
     }
   };
 

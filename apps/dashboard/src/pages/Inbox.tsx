@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, } from "react";
 import { api, type Member } from "../api";
 import { attempt, Avatar, Spinner, timeAgo, } from "../components/ui";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { formatDate, relativeTime, t as translateNow, useI18n, type DashKey } from "../i18n";
 import { Link, useRouter } from "../router";
 import { ConversationPane } from "../conversation/ConversationPane";
 import { contactName } from "../conversation/format";
@@ -52,6 +53,7 @@ export function InboxPage({
   const accessLost = useRef(onAccessLost);
   accessLost.current = onAccessLost;
   const { navigate } = useRouter();
+  const { t } = useI18n();
   const [status, setStatus] = useState<ConversationStatus>("open");
   const [assignee, setAssignee] = useState<AssigneeFilter>("all");
   const [items, setItems] = useState<AgentConversation[] | null>(null);
@@ -135,7 +137,7 @@ export function InboxPage({
         });
         const fromContact = c.lastMessage?.authorType === "contact" && c.unreadCount > 0;
         if (fromContact && (document.hidden || selectedRef.current !== c.id)) {
-          notify(contactName(c), c.lastMessage?.body || "📎 Attachment", () => navigate(`/w/${workspaceId}/inbox/${c.id}`));
+          notify(contactName(c), c.lastMessage?.body || translateNow("inbox.attachment"), () => navigate(`/w/${workspaceId}/inbox/${c.id}`));
         }
       },
     });
@@ -146,32 +148,32 @@ export function InboxPage({
   const unread = useMemo(() => (items ?? []).reduce((n, c) => n + (c.unreadCount > 0 ? 1 : 0), 0), [items]);
   useEffect(() => {
     if (status === "open" && assignee === "all") onUnread(unread);
-    document.title = unread > 0 ? `(${unread}) Support Inbox` : "Support Inbox";
-  }, [unread, status, assignee, onUnread]);
+    document.title = unread > 0 ? `(${unread}) ${t("inbox.title")}` : t("inbox.title");
+  }, [unread, status, assignee, onUnread, t]);
 
   const selected = items?.find((c) => c.id === conversationId) ?? null;
 
   return (
     <div className="inbox">
-      <section className="inbox-list" aria-label="Conversations">
+      <section className="inbox-list" aria-label={t("inbox.conversations")}>
         {liveStopped && (
           <div className="live-banner" role="status">
-            Live updates stopped.
+            {t("inbox.liveStopped")}
             <button type="button" className="btn btn-sm" onClick={() => location.reload()}>
-              Reload
+              {t("common.reload")}
             </button>
           </div>
         )}
         {notifyPermission === "default" && !notifyDismissed && (
           <div className="live-banner">
-            Get a desktop alert for new messages.
+            {t("inbox.notifyPrompt")}
             <span className="row">
               <button
                 type="button"
                 className="btn btn-sm"
                 onClick={() => void Notification.requestPermission().then(setNotifyPermission, () => {})}
               >
-                Enable notifications
+                {t("inbox.enableNotifications")}
               </button>
               <button
                 type="button"
@@ -185,25 +187,25 @@ export function InboxPage({
                   }
                 }}
               >
-                Not now
+                {t("inbox.notNow")}
               </button>
             </span>
           </div>
         )}
         <div className="inbox-filters">
-          <div className="segmented" role="tablist" aria-label="Status">
+          <div className="segmented" role="tablist" aria-label={t("inbox.statusFilter")}>
             {(["open", "pending", "resolved"] as const).map((s) => (
               <button type="button" key={s} role="tab" aria-selected={status === s} className={status === s ? "active" : ""} onClick={() => setStatus(s)}>
-                {s[0]!.toUpperCase() + s.slice(1)}
+                {t(`status.${s}`)}
               </button>
             ))}
           </div>
-          <div className="segmented" role="tablist" aria-label="Assignee">
+          <div className="segmented" role="tablist" aria-label={t("inbox.assignee")}>
             {(
               [
-                ["all", "All"],
-                ["me", "Mine"],
-                ["unassigned", "Unassigned"],
+                ["all", t("inbox.all")],
+                ["me", t("inbox.mine")],
+                ["unassigned", t("inbox.unassigned")],
               ] as const
             ).map(([value, label]) => (
               <button type="button" key={value} role="tab" aria-selected={assignee === value} className={assignee === value ? "active" : ""} onClick={() => setAssignee(value)}>
@@ -215,15 +217,15 @@ export function InboxPage({
         <div className="conv-items">
           {items === null && loadFailed ? (
             <div className="empty">
-              Couldn't load conversations.{" "}
+              {t("inbox.loadFailed")}{" "}
               <button type="button" className="btn btn-sm" onClick={() => setReloadNonce((n) => n + 1)}>
-                Retry
+                {t("common.retry")}
               </button>
             </div>
           ) : items === null ? (
             <Spinner />
           ) : items.length === 0 ? (
-            <div className="empty">No {status} conversations 🎉</div>
+            <div className="empty">{t(`inbox.empty.${status}`)}</div>
           ) : (
             <>
               {items.map((c) => (
@@ -239,14 +241,14 @@ export function InboxPage({
                       <time dateTime={new Date(c.lastMessageAt).toISOString()}>{timeAgo(c.lastMessageAt)}</time>
                     </div>
                     <div className="conv-item-preview">
-                      {c.lastMessage?.authorType === "agent" && (c.lastMessage.author?.id === me.agent.id ? "You: " : `${c.lastMessage.author?.name ?? "Agent"}: `)}
-                      {c.lastMessage?.systemEvent ? `— ${c.lastMessage.systemEvent.replace("_", " ")}` : c.lastMessage?.body || "📎 Attachment"}
+                      {c.lastMessage?.authorType === "agent" && `${c.lastMessage.author?.id === me.agent.id ? t("inbox.you") : (c.lastMessage.author?.name ?? t("inbox.agent"))}: `}
+                      {c.lastMessage?.systemEvent ? `— ${eventLabel(c.lastMessage.systemEvent)}` : c.lastMessage?.body || t("inbox.attachment")}
                     </div>
                   </div>
                   {c.unreadCount > 0 && (
                     <>
                       <i className="unread-dot" aria-hidden="true" />
-                      <span className="sr-only">{c.unreadCount} unread</span>
+                      <span className="sr-only">{t("inbox.unreadCount", { count: c.unreadCount })}</span>
                     </>
                   )}
                 </Link>
@@ -265,11 +267,11 @@ export function InboxPage({
                         if (filterRef.current.status !== f.status || filterRef.current.assignee !== f.assignee) return;
                         setItems((prev) => [...(prev ?? []), ...page.items.filter((i) => !prev?.some((p) => p.id === i.id))]);
                         setCursor(page.nextCursor);
-                      }, "Couldn't load more conversations");
+                      }, t("inbox.loadMoreFailed"));
                       setLoadingMore(false);
                     }}
                   >
-                    {loadingMore ? "Loading…" : "Load more"}
+                    {loadingMore ? t("common.loadingMore") : t("inbox.loadMore")}
                   </button>
                 </div>
               )}
@@ -294,7 +296,7 @@ export function InboxPage({
         </ErrorBoundary>
       ) : (
         <div className="empty" style={{ alignSelf: "center" }}>
-          Select a conversation
+          {t("inbox.select")}
         </div>
       )}
       {conversationId && selected && <ContactPane conversation={selected} />}
@@ -302,22 +304,30 @@ export function InboxPage({
   );
 }
 
+const EVENTS = ["resolved", "reopened", "assigned", "csat_request", "auto_reply"] as const;
+
+/** Short label for a system event in the list preview; an unknown event shows as sent. */
+function eventLabel(event: string): string {
+  return (EVENTS as readonly string[]).includes(event) ? translateNow(`event.${event}` as DashKey) : event;
+}
+
 function ContactPane({ conversation: c }: { conversation: AgentConversation }) {
+  const { t } = useI18n();
   return (
-    <aside className="contact-pane" aria-label="Contact">
+    <aside className="contact-pane" aria-label={t("contact.aria")}>
       <div className="row">
         <Avatar name={contactName(c)} />
         <div>
           <strong>{contactName(c)}</strong>
           <div className="muted" style={{ fontSize: 12 }}>
-            {c.contact.verified ? "✓ Verified user" : "Anonymous visitor"}
+            {c.contact.verified ? t("contact.verified") : t("contact.anonymous")}
           </div>
         </div>
       </div>
       <dl>
         {c.contact.email && (
           <>
-            <dt>Email</dt>
+            <dt>{t("common.email")}</dt>
             <dd>
               <a href={`mailto:${c.contact.email}`}>{c.contact.email}</a>
             </dd>
@@ -325,19 +335,19 @@ function ContactPane({ conversation: c }: { conversation: AgentConversation }) {
         )}
         {c.contact.externalId && (
           <>
-            <dt>User ID</dt>
+            <dt>{t("contact.userId")}</dt>
             <dd>{c.contact.externalId}</dd>
           </>
         )}
-        <dt>Language</dt>
+        <dt>{t("common.language")}</dt>
         <dd>{c.contact.locale ?? "—"}</dd>
-        <dt>Last seen</dt>
-        <dd>{timeAgo(c.contact.lastSeenAt)} ago</dd>
-        <dt>Started</dt>
-        <dd>{new Date(c.createdAt).toLocaleString()}</dd>
+        <dt>{t("contact.lastSeen")}</dt>
+        <dd>{relativeTime(c.contact.lastSeenAt)}</dd>
+        <dt>{t("contact.started")}</dt>
+        <dd>{formatDate(c.createdAt, { dateStyle: "medium", timeStyle: "short" })}</dd>
         {c.csatScore !== null && (
           <>
-            <dt>Rating</dt>
+            <dt>{t("contact.rating")}</dt>
             <dd>
               {"★".repeat(c.csatScore)}
               {"☆".repeat(5 - c.csatScore)}

@@ -327,14 +327,14 @@ describe("FaqPage article editor", () => {
     fireEvent.change(bodyInput(), { target: { value: "Use **cards** or *cash*." } });
 
     expect(slugInput().value).toBe("how-to-pay");
-    expect(tabNames()).toEqual(["EN ○ (draft)", "NL"]);
+    expect(tabNames()).toEqual(["EN ○ (Draft)", "NL"]);
     expect(preview(container).querySelector("h2")!.textContent).toBe("  How to pay  ");
     expect(preview(container).querySelector(".lc-md strong")!.textContent).toBe("cards");
     expect(preview(container).querySelector(".lc-md em")!.textContent).toBe("cash");
 
     expect(publish().disabled).toBe(false);
     fireEvent.click(publish());
-    expect(tabNames()).toEqual(["EN ● (published)", "NL"]);
+    expect(tabNames()).toEqual(["EN ● (Published)", "NL"]);
 
     // A locale with a body but no title blocks the save and is pointed out (not silently dropped).
     fireEvent.click(screen.getByRole("tab", { name: "NL" }));
@@ -415,7 +415,7 @@ describe("FaqPage article editor", () => {
     const { container } = renderFaq("/w/ws_1/faq/a1");
     await screen.findByRole("heading", { name: "Pay invoices", level: 1 });
 
-    expect(tabNames()).toEqual(["EN ● (published)", "NL ○ (draft)"]);
+    expect(tabNames()).toEqual(["EN ● (Published)", "NL ○ (Draft)"]);
     expect(titleInput().value).toBe("Pay invoices");
     expect(slugInput().value).toBe("pay-invoices");
     expect(publish().checked).toBe(true);
@@ -451,7 +451,7 @@ describe("FaqPage article editor", () => {
 
     expect(screen.queryByRole("button", { name: "Remove NL translation" })).toBeNull();
     expect(titleInput().value).toBe("");
-    expect(tabNames()).toEqual(["EN ● (published)", "NL"]);
+    expect(tabNames()).toEqual(["EN ● (Published)", "NL"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.find("PATCH", `${W}/faq/articles/a1`)).toHaveLength(1));

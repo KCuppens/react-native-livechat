@@ -219,7 +219,7 @@ describe("InboxPage conversation list", () => {
     expect(container.querySelector(".conv-item.unread")?.getAttribute("href")).toBe("/w/ws_1/inbox/cv_1");
     // Agent-authored previews get a "You:" prefix; system events and attachment-only messages get a label.
     expect(screen.getByText(/we are on it/).textContent).toBe("You: we are on it");
-    expect(screen.getByText("— csat request")).toBeTruthy();
+    expect(screen.getByText("— rating requested")).toBeTruthy();
     expect(screen.getByText("anon@x.test")).toBeTruthy();
     expect(screen.getByText("📎 Attachment")).toBeTruthy();
     expect(screen.getByText("Select a conversation")).toBeTruthy();
@@ -517,7 +517,7 @@ describe("InboxPage conversation pane", () => {
     expect(within(pane).getByText("jane@x.test").getAttribute("href")).toBe("mailto:jane@x.test");
     expect(within(pane).getByText("user-42")).toBeTruthy();
     expect(within(pane).getByText("nl")).toBeTruthy();
-    expect(within(pane).getByText("2m ago")).toBeTruthy();
+    expect(within(pane).getByText("2 minutes ago")).toBeTruthy();
     expect(within(pane).getByText("★★★★☆")).toBeTruthy();
     expect(within(pane).getByText("“Quick help”")).toBeTruthy();
     expect(within(thread()).getByText("jane@x.test")).toBeTruthy();
@@ -710,15 +710,15 @@ describe("InboxPage conversation pane", () => {
 
     fireEvent.click(header.getByRole("button", { name: "Snooze" }));
     await waitFor(() => expect(header.queryByRole("button", { name: "Snooze" })).toBeNull());
-    expect(header.getByText("pending")).toBeTruthy();
+    expect(header.getByText("Pending")).toBeTruthy();
 
     fireEvent.click(header.getByRole("button", { name: "Resolve" }));
     const reopen = await header.findByRole("button", { name: "Reopen" });
-    expect(header.getByText("resolved")).toBeTruthy();
+    expect(header.getByText("Resolved")).toBeTruthy();
 
     fireEvent.click(reopen);
     await header.findByRole("button", { name: "Snooze" });
-    expect(header.getByText("open")).toBeTruthy();
+    expect(header.getByText("Open")).toBeTruthy();
 
     expect(api.find("PATCH", CONV).map((c) => JSON.parse(c.init.body as string))).toEqual([
       { assigneeId: "ag_bo" },

@@ -492,12 +492,12 @@ describe("SettingsPage team tab", () => {
     const bo = screen.getByText("Bo Other").closest("tr")!;
     expect(within(mine).getByText("online")).toBeTruthy();
     expect(within(mine).getByText("alex@acme.test")).toBeTruthy();
-    expect(within(mine).getByText("admin")).toBeTruthy();
+    expect(within(mine).getByText("Admin")).toBeTruthy();
     expect(within(mine).queryByRole("button", { name: "Remove" })).toBeNull();
     expect(mine.querySelector(".avatar")!.textContent).toBe("AA");
 
     expect(within(bo).queryByText("online")).toBeNull();
-    expect(within(bo).getByText("agent")).toBeTruthy();
+    expect(within(bo).getByText("Agent")).toBeTruthy();
     expect((bo.querySelector(".avatar img") as HTMLImageElement).src).toBe("https://img.test/bo.png");
     expect(within(bo).getByRole("button", { name: "Remove" })).toBeTruthy();
   });

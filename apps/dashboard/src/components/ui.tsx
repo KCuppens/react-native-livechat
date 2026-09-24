@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode, type SVGProps } from "react";
 import { ApiError } from "../api";
+import { formatDate, t, useI18n } from "../i18n";
 
 export function initials(name: string | null | undefined) {
   if (!name) return "?";
@@ -12,16 +13,17 @@ export function Avatar({ name, url }: { name: string | null | undefined; url?: s
 }
 
 export function Spinner() {
-  return <div className="spinner" role="status" aria-label="Loading" />;
+  const { t } = useI18n();
+  return <div className="spinner" role="status" aria-label={t("common.loading")} />;
 }
 
 export function timeAgo(ts: number): string {
   const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return "now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
-  return new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  if (s < 60) return t("time.now");
+  if (s < 3600) return t("time.minutes", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("time.hours", { n: Math.floor(s / 3600) });
+  if (s < 7 * 86400) return t("time.days", { n: Math.floor(s / 86400) });
+  return formatDate(ts, { day: "numeric", month: "short" });
 }
 
 let showToast: (msg: string) => void = () => {};
@@ -31,7 +33,7 @@ export const toast = (msg: string) => showToast(msg);
  * Runs a user action and reports failure as a toast instead of an unhandled rejection.
  * Resolves true on success so callers can skip follow-up steps after a failure.
  */
-export async function attempt(action: () => Promise<unknown>, fallback = "Something went wrong"): Promise<boolean> {
+export async function attempt(action: () => Promise<unknown>, fallback = t("common.error")): Promise<boolean> {
   try {
     await action();
     return true;

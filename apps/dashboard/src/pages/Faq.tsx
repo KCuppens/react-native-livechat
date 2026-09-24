@@ -3,12 +3,14 @@ import { Markdown } from "@kobecuppens/livechat-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { attempt, Field, Spinner, toast } from "../components/ui";
+import { t as translateNow, useI18n } from "../i18n";
 import { Link, useRouter } from "../router";
 
 const titleOf = (a: AgentFaqArticle, locale: string) =>
-  a.translations[locale]?.title ?? Object.values(a.translations)[0]?.title ?? "(untitled)";
+  a.translations[locale]?.title ?? Object.values(a.translations)[0]?.title ?? translateNow("faq.untitled");
 
 export function FaqPage({ workspaceId, articleId }: { workspaceId: string; articleId: string | null }) {
+  const { t } = useI18n();
   const [articles, setArticles] = useState<AgentFaqArticle[] | null>(null);
   const [categories, setCategories] = useState<AgentFaqCategory[]>([]);
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
@@ -24,7 +26,7 @@ export function FaqPage({ workspaceId, articleId }: { workspaceId: string; artic
       setLoadFailed(false);
     } catch {
       setLoadFailed(true);
-      toast("Couldn't load the help center");
+      toast(translateNow("faq.loadFailedToast"));
     }
   }, [workspaceId]);
 
@@ -35,9 +37,9 @@ export function FaqPage({ workspaceId, articleId }: { workspaceId: string; artic
   if (!articles || !settings) {
     return loadFailed ? (
       <div className="empty">
-        Couldn't load the help center.{" "}
+        {t("faq.loadFailed")}{" "}
         <button type="button" className="btn btn-sm" onClick={() => void reload()}>
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     ) : (
@@ -49,7 +51,7 @@ export function FaqPage({ workspaceId, articleId }: { workspaceId: string; artic
     if (articleId !== "new" && !article) {
       return (
         <div className="empty">
-          Article not found. <Link to={`/w/${workspaceId}/faq`}>Back to the help center</Link>
+          {t("faq.notFound")} <Link to={`/w/${workspaceId}/faq`}>{t("faq.backToList")}</Link>
         </div>
       );
     }
@@ -72,27 +74,28 @@ function ArticleList({
   onChange: () => Promise<void>;
 }) {
   const { navigate } = useRouter();
+  const { t } = useI18n();
   const [newCategory, setNewCategory] = useState("");
   const locale = settings.defaultLocale;
-  const groups = [...categories.map((c) => ({ id: c.id as string | null, title: c.titles[locale] ?? c.slug })), { id: null, title: "Uncategorized" }];
+  const groups = [...categories.map((c) => ({ id: c.id as string | null, title: c.titles[locale] ?? c.slug })), { id: null, title: t("faq.uncategorized") }];
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <h1>Help center</h1>
+          <h1>{t("nav.faq")}</h1>
           <p className="muted" style={{ margin: "4px 0 0" }}>
-            Articles show in the in-app help center and are suggested before customers start a chat.
+            {t("faq.intro")}
           </p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => navigate(`/w/${workspaceId}/faq/new`)}>
-          New article
+          {t("faq.newArticle")}
         </button>
       </div>
 
       <div className="card">
-        <h2>Categories</h2>
-        <p className="muted">Group articles into topics. Titles are per language.</p>
+        <h2>{t("faq.categories")}</h2>
+        <p className="muted">{t("faq.categoriesIntro")}</p>
         <table className="table">
           <tbody>
             {categories.map((c) => (
@@ -110,16 +113,16 @@ function ArticleList({
               await api.saveFaqCategory(workspaceId, null, { titles: { [locale]: newCategory.trim() }, position: categories.length });
               setNewCategory("");
               await onChange();
-            }, "Couldn't add category");
+            }, t("faq.addCategoryFailed"));
           }}
         >
-          <input className="input" aria-label={`New category title (${locale})`} placeholder={`New category title (${locale})`} value={newCategory} onChange={(e) => setNewCategory(e.target.value)} style={{ maxWidth: 320 }} />
-          <button type="submit" className="btn">Add category</button>
+          <input className="input" aria-label={t("faq.newCategoryPlaceholder", { locale })} placeholder={t("faq.newCategoryPlaceholder", { locale })} value={newCategory} onChange={(e) => setNewCategory(e.target.value)} style={{ maxWidth: 320 }} />
+          <button type="submit" className="btn">{t("faq.addCategory")}</button>
         </form>
       </div>
 
       {articles.length === 0 ? (
-        <div className="card empty">No articles yet. Start with your most common question.</div>
+        <div className="card empty">{t("faq.noArticles")}</div>
       ) : (
         groups.map((g) => {
           const list = articles.filter((a) => a.categoryId === g.id);
@@ -130,10 +133,10 @@ function ArticleList({
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Languages</th>
-                    <th>Views</th>
-                    <th>Helpful</th>
+                    <th>{t("common.title")}</th>
+                    <th>{t("faq.languages")}</th>
+                    <th>{t("faq.views")}</th>
+                    <th>{t("faq.helpful")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -159,15 +162,15 @@ function ArticleList({
                               key={l}
                               className={`badge${a.translations[l]?.published ? " badge-open" : ""}`}
                               style={{ marginRight: 4, opacity: a.translations[l] ? 1 : 0.4 }}
-                              title={a.translations[l] ? (a.translations[l]!.published ? "Published" : "Draft") : "Missing"}
+                              title={a.translations[l] ? (a.translations[l]!.published ? t("faq.published") : t("faq.draft")) : t("faq.missing")}
                             >
                               {l}
-                              <span className="sr-only">: {a.translations[l] ? (a.translations[l]!.published ? "published" : "draft") : "missing"}</span>
+                              <span className="sr-only">: {a.translations[l] ? (a.translations[l]!.published ? t("faq.published") : t("faq.draft")) : t("faq.missing")}</span>
                             </span>
                           ))}
                         </td>
                         <td>{a.viewCount}</td>
-                        <td>{votes ? `${Math.round((a.helpfulCount / votes) * 100)}% of ${votes}` : "—"}</td>
+                        <td>{votes ? t("faq.helpfulValue", { percent: Math.round((a.helpfulCount / votes) * 100), votes }) : "—"}</td>
                       </tr>
                     );
                   })}
@@ -182,13 +185,14 @@ function ArticleList({
 }
 
 function CategoryRow({ workspaceId, category, locales, onChange }: { workspaceId: string; category: AgentFaqCategory; locales: string[]; onChange: () => Promise<void> }) {
+  const { t } = useI18n();
   const [titles, setTitles] = useState(category.titles);
   const dirty = JSON.stringify(titles) !== JSON.stringify(category.titles);
   return (
     <tr>
       {locales.map((l) => (
         <td key={l}>
-          <input className="input" aria-label={`Title (${l})`} placeholder={l} value={titles[l] ?? ""} onChange={(e) => setTitles({ ...titles, [l]: e.target.value })} />
+          <input className="input" aria-label={t("faq.categoryTitle", { locale: l })} placeholder={l} value={titles[l] ?? ""} onChange={(e) => setTitles({ ...titles, [l]: e.target.value })} />
         </td>
       ))}
       <td style={{ width: 1, whiteSpace: "nowrap" }}>
@@ -197,21 +201,21 @@ function CategoryRow({ workspaceId, category, locales, onChange }: { workspaceId
           disabled={!dirty}
           onClick={async () => {
             const clean = Object.fromEntries(Object.entries(titles).filter(([, v]) => v.trim()));
-            if (!(await attempt(() => api.saveFaqCategory(workspaceId, category.id, { titles: clean }), "Couldn't save category"))) return;
-            toast("Category saved");
+            if (!(await attempt(() => api.saveFaqCategory(workspaceId, category.id, { titles: clean }), t("faq.saveCategoryFailed")))) return;
+            toast(t("faq.categorySaved"));
             await onChange();
           }}
         >
-          Save
+          {t("common.save")}
         </button>{" "}
         <button type="button"
           className="btn btn-sm btn-danger"
           onClick={async () => {
-            if (!confirm("Delete this category? Its articles become uncategorized.")) return;
-            if (await attempt(() => api.deleteFaqCategory(workspaceId, category.id), "Couldn't delete category")) await onChange();
+            if (!confirm(t("faq.deleteCategoryConfirm"))) return;
+            if (await attempt(() => api.deleteFaqCategory(workspaceId, category.id), t("faq.deleteCategoryFailed"))) await onChange();
           }}
         >
-          Delete
+          {t("common.delete")}
         </button>
       </td>
     </tr>
@@ -234,6 +238,7 @@ function ArticleEditor({
   onSaved: () => Promise<void>;
 }) {
   const { navigate } = useRouter();
+  const { t } = useI18n();
   const [locale, setLocale] = useState(settings.defaultLocale);
   const [categoryId, setCategoryId] = useState<string | null>(article?.categoryId ?? null);
   const [draft, setDraft] = useState<Draft>(() =>
@@ -266,16 +271,16 @@ function ArticleEditor({
     }
     for (const l of removed) translations[l] = null;
     if (Object.values(translations).every((t) => t === null) && !article) {
-      toast("Add a title first");
+      toast(t("faq.addTitleFirst"));
       return;
     }
     setSaving(true);
     await attempt(async () => {
       const saved = await api.saveFaqArticle(workspaceId, article?.id ?? null, { categoryId, translations });
       await onSaved();
-      toast("Saved");
+      toast(t("common.saved"));
       if (!article) navigate(`/w/${workspaceId}/faq/${saved.id}`, true);
-    }, "Save failed");
+    }, t("common.saveFailed"));
     setSaving(false);
   };
 
@@ -284,34 +289,34 @@ function ArticleEditor({
       <div className="page-header">
         <div className="row">
           <button type="button" className="btn btn-sm" onClick={() => navigate(`/w/${workspaceId}/faq`)}>
-            ← Back
+            {t("common.back")}
           </button>
-          <h1>{article ? titleOf(article, settings.defaultLocale) : "New article"}</h1>
+          <h1>{article ? titleOf(article, settings.defaultLocale) : t("faq.newArticle")}</h1>
         </div>
         <div className="row">
           {article && (
             <button type="button"
               className="btn btn-danger"
               onClick={async () => {
-                if (!confirm("Delete this article in all languages?")) return;
-                if (!(await attempt(() => api.deleteFaqArticle(workspaceId, article.id), "Couldn't delete article"))) return;
+                if (!confirm(t("faq.deleteArticleConfirm"))) return;
+                if (!(await attempt(() => api.deleteFaqArticle(workspaceId, article.id), t("faq.deleteArticleFailed")))) return;
                 await onSaved();
                 navigate(`/w/${workspaceId}/faq`);
               }}
             >
-              Delete
+              {t("common.delete")}
             </button>
           )}
           <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("common.saving") : t("common.save")}
           </button>
         </div>
       </div>
 
       <div className="row" style={{ marginBottom: 16, maxWidth: 360 }}>
-        <Field label="Category">
+        <Field label={t("faq.category")}>
           <select className="select" value={categoryId ?? ""} onChange={(e) => setCategoryId(e.target.value || null)}>
-            <option value="">Uncategorized</option>
+            <option value="">{t("faq.uncategorized")}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.titles[settings.defaultLocale] ?? c.slug}
@@ -328,7 +333,7 @@ function ArticleEditor({
             {draft[l]?.title && (
               <>
                 <span aria-hidden="true">{draft[l]!.published ? " ●" : " ○"}</span>
-                <span className="sr-only">{draft[l]!.published ? " (published)" : " (draft)"}</span>
+                <span className="sr-only">{` (${draft[l]!.published ? t("faq.published") : t("faq.draft")})`}</span>
               </>
             )}
           </button>
@@ -337,33 +342,33 @@ function ArticleEditor({
 
       <div className="split">
         <div>
-          <Field label="Title">
+          <Field label={t("common.title")}>
             <input
               className="input"
               value={current?.title ?? ""}
               onChange={(e) => setField({ title: e.target.value })}
-              placeholder="How do I…?"
+              placeholder={t("faq.titlePlaceholder")}
               aria-invalid={untitledLocale === locale}
               aria-describedby={untitledLocale === locale ? "untitled-error" : undefined}
             />
             {untitledLocale === locale && (
               <div className="error-text" role="alert" id="untitled-error">
                 {article?.translations[locale]
-                  ? `Add a title for ${locale.toUpperCase()}, or remove the ${locale.toUpperCase()} translation below.`
-                  : `Add a title for ${locale.toUpperCase()}, or clear its body to leave this language out.`}
+                  ? t("faq.untitledExisting", { locale: locale.toUpperCase() })
+                  : t("faq.untitledNew", { locale: locale.toUpperCase() })}
               </div>
             )}
           </Field>
-          <Field label="URL slug" hint="Leave empty to generate from the title.">
+          <Field label={t("faq.slug")} hint={t("faq.slugHint")}>
             <input className="input" value={current?.slug ?? ""} onChange={(e) => setField({ slug: e.target.value.toLowerCase() })} placeholder="how-do-i" />
           </Field>
-          <Field label="Body (Markdown)" hint="Supports **bold**, *italic*, lists, links, images and `code`. HTML is shown as text.">
+          <Field label={t("faq.body")} hint={t("faq.bodyHint")}>
             <textarea className="textarea" style={{ minHeight: 360, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13 }} value={current?.bodyMd ?? ""} onChange={(e) => setField({ bodyMd: e.target.value })} />
           </Field>
           <div className="row">
             <label className="row">
               <input type="checkbox" checked={current?.published ?? false} onChange={(e) => setField({ published: e.target.checked })} disabled={!current?.title} />
-              Published in {locale.toUpperCase()}
+              {t("faq.publishedIn", { locale: locale.toUpperCase() })}
             </label>
             {article?.translations[locale] && !removed.includes(locale) && (
               <button type="button"
@@ -375,17 +380,17 @@ function ArticleEditor({
                   setUntitledLocale((u) => (u === locale ? null : u));
                 }}
               >
-                Remove {locale.toUpperCase()} translation
+                {t("faq.removeTranslation", { locale: locale.toUpperCase() })}
               </button>
             )}
           </div>
         </div>
         <div>
           <div className="field">
-            <span>Preview</span>
+            <span>{t("faq.preview")}</span>
           </div>
           <div className="preview">
-            <h2 style={{ marginBottom: 12 }}>{current?.title || <span className="muted">Untitled</span>}</h2>
+            <h2 style={{ marginBottom: 12 }}>{current?.title || <span className="muted">{t("faq.untitledPreview")}</span>}</h2>
             <Markdown source={current?.bodyMd ?? ""} images />
           </div>
         </div>

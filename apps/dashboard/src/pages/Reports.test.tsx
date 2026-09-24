@@ -72,7 +72,7 @@ describe("ReportsPage", () => {
       "3 ratings of 4",
       "2 ratings of 3",
       "0 ratings of 2",
-      "1 ratings of 1",
+      "1 rating of 1",
     ]);
     expect((bars[0]!.querySelector("i") as HTMLElement).style.width).toBe("100%");
     expect((bars[1]!.querySelector("i") as HTMLElement).style.width).toBe("75%");

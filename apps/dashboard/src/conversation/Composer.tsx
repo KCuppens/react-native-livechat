@@ -3,6 +3,7 @@ import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE } from "@kobecupp
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "../api";
 import { toast } from "../components/ui";
+import { useI18n } from "../i18n";
 
 /**
  * Reply box: draft, saved replies ("/" + arrows + Enter/Tab), attachments (button, file
@@ -22,6 +23,7 @@ export function Composer({
   onSend: (body: string, attachments: Attachment[]) => void;
   onTyping: (typing: boolean) => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState("");
   const [uploads, setUploads] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -85,7 +87,7 @@ export function Composer({
         setUploads((u) => [...u, att]);
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Upload failed");
+      toast(err instanceof Error ? err.message : t("composer.uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -94,7 +96,7 @@ export function Composer({
   return (
     <div className="composer">
       {cannedMatches.length > 0 && (
-        <div className="canned-menu" role="listbox" id={menuId} aria-label="Saved replies">
+        <div className="canned-menu" role="listbox" id={menuId} aria-label={t("composer.savedReplies")}>
           {cannedMatches.map((c, i) => (
             <button
               type="button"
@@ -117,8 +119,8 @@ export function Composer({
       )}
       <textarea
         value={draft}
-        placeholder={`Reply to ${contactLabel}… (type / for saved replies)`}
-        aria-label="Reply"
+        placeholder={t("composer.placeholder", { name: contactLabel })}
+        aria-label={t("composer.reply")}
         // Combobox semantics so screen readers announce the saved-replies list and the
         // highlighted reply that Enter/Tab will insert.
         role="combobox"
@@ -144,7 +146,7 @@ export function Composer({
         <div className="row">
           {/* A real button: a <label> around a hidden input can't be reached with the keyboard. */}
           <button type="button" className="btn btn-sm" onClick={() => fileInput.current?.click()} disabled={uploading}>
-            📎 Attach
+            {t("composer.attach")}
           </button>
           <input
             ref={fileInput}
@@ -157,7 +159,7 @@ export function Composer({
               e.target.value = "";
             }}
           />
-          {uploading && <span className="muted">Uploading…</span>}
+          {uploading && <span className="muted">{t("composer.uploading")}</span>}
           {uploads.map((u) => (
             <span key={u.id} className="file-chip">
               {u.name}
@@ -165,7 +167,7 @@ export function Composer({
                 type="button"
                 className="btn-ghost"
                 style={{ border: 0, background: "none" }}
-                aria-label={`Remove ${u.name}`}
+                aria-label={t("composer.removeFile", { name: u.name })}
                 onClick={() => setUploads((all) => all.filter((x) => x.id !== u.id))}
               >
                 ×
@@ -174,7 +176,7 @@ export function Composer({
           ))}
         </div>
         <button type="button" className="btn btn-primary" onClick={send} disabled={!canSend}>
-          Send
+          {t("composer.send")}
         </button>
       </div>
     </div>

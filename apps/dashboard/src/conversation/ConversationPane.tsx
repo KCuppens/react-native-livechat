@@ -3,20 +3,19 @@ import { Markdown } from "@kobecuppens/livechat-react";
 import { memo, useLayoutEffect, useRef } from "react";
 import type { Member } from "../api";
 import { Avatar, Spinner } from "../components/ui";
+import { useI18n, type DashKey, type Vars } from "../i18n";
 import { Composer } from "./Composer";
 import { contactName } from "./format";
 import { useConversationThread } from "./useConversationThread";
 import { useTypingSender } from "./useTypingSender";
 
-const SYSTEM_TEXT: Record<string, (m: Message) => string> = {
-  resolved: () => "Marked as resolved",
-  reopened: () => "Reopened",
-  assigned: (m) => `Assigned to ${m.body}`,
-  csat_request: () => "Rating requested",
-  auto_reply: (m) => `Auto-reply: ${m.body}`,
+const SYSTEM_TEXT: Record<string, (m: Message) => [DashKey, Vars?]> = {
+  resolved: () => ["sys.resolved"],
+  reopened: () => ["sys.reopened"],
+  assigned: (m) => ["sys.assigned", { name: m.body }],
+  csat_request: () => ["sys.csat_request"],
+  auto_reply: (m) => ["sys.auto_reply", { body: m.body }],
 };
-
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
 // Memoized: the inbox list re-renders on every workspace event; the open thread shouldn't.
 export const ConversationPane = memo(function ConversationPane({
@@ -36,6 +35,7 @@ export const ConversationPane = memo(function ConversationPane({
   online: string[];
   onAccessLost: () => void;
 }) {
+  const { t } = useI18n();
   const thread = useConversationThread(me, workspaceId, conversationId, summary, onAccessLost);
   const { conversation, messages, pending, contactTyping, update } = thread;
   const sendTyping = useTypingSender(thread.socketRef);
@@ -69,43 +69,43 @@ export const ConversationPane = memo(function ConversationPane({
   const seen = lastAgent && conversation && conversation.contactLastReadAt >= lastAgent.createdAt;
 
   return (
-    <section className="thread" aria-label="Conversation">
+    <section className="thread" aria-label={t("thread.aria")}>
       <header className="thread-header">
         <Avatar name={contact} />
         <div className="title">
           <div>
-            <strong>{contact}</strong> {conversation && <span className={`badge badge-${conversation.status}`}>{conversation.status}</span>}
+            <strong>{contact}</strong> {conversation && <span className={`badge badge-${conversation.status}`}>{t(`status.${conversation.status}`)}</span>}
           </div>
-          <div>{conversation?.contact.email ?? (conversation?.contact.verified ? "Verified user" : "Anonymous visitor")}</div>
+          <div>{conversation?.contact.email ?? (conversation?.contact.verified ? t("thread.verified") : t("contact.anonymous"))}</div>
         </div>
         <select
           className="select"
           style={{ width: 170 }}
-          aria-label="Assignee"
+          aria-label={t("inbox.assignee")}
           value={conversation?.assignee?.id ?? ""}
           onChange={(e) => void update({ assigneeId: e.target.value || null })}
         >
-          <option value="">Unassigned</option>
+          <option value="">{t("inbox.unassigned")}</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.id === me.agent.id ? `${m.name} (you)` : m.name}
+              {m.id === me.agent.id ? t("thread.you", { name: m.name }) : m.name}
               {online.includes(m.id) ? " ●" : ""}
             </option>
           ))}
         </select>
         {conversation?.status === "resolved" ? (
           <button type="button" className="btn" onClick={() => void update({ status: "open" })}>
-            Reopen
+            {t("thread.reopen")}
           </button>
         ) : (
           <>
             {conversation?.status !== "pending" && (
-              <button type="button" className="btn" onClick={() => void update({ status: "pending" })} title="Waiting on the customer">
-                Snooze
+              <button type="button" className="btn" onClick={() => void update({ status: "pending" })} title={t("thread.snoozeTitle")}>
+                {t("thread.snooze")}
               </button>
             )}
             <button type="button" className="btn btn-primary" onClick={() => void update({ status: "resolved" })}>
-              Resolve
+              {t("thread.resolve")}
             </button>
           </>
         )}
@@ -113,9 +113,9 @@ export const ConversationPane = memo(function ConversationPane({
 
       {thread.liveStopped && (
         <div className="live-banner" role="status">
-          Live updates stopped for this conversation.
+          {t("thread.liveStopped")}
           <button type="button" className="btn btn-sm" onClick={() => location.reload()}>
-            Reload
+            {t("common.reload")}
           </button>
         </div>
       )}
@@ -130,9 +130,9 @@ export const ConversationPane = memo(function ConversationPane({
       >
         {messages === null && thread.loadFailed ? (
           <div className="empty">
-            Couldn't load this conversation.{" "}
+            {t("thread.loadFailed")}{" "}
             <button type="button" className="btn btn-sm" onClick={thread.retryLoad}>
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         ) : messages === null ? (
@@ -141,7 +141,7 @@ export const ConversationPane = memo(function ConversationPane({
           <>
             {thread.older && (
               <button type="button" className="btn btn-sm" style={{ alignSelf: "center" }} disabled={thread.loadingOlder} onClick={() => void thread.loadOlder()}>
-                {thread.loadingOlder ? "Loading…" : "Load earlier"}
+                {thread.loadingOlder ? t("common.loadingMore") : t("thread.loadEarlier")}
               </button>
             )}
             <ThreadMessages messages={messages} contact={contact} seenId={seen ? lastAgent?.id : undefined} />
@@ -151,10 +151,10 @@ export const ConversationPane = memo(function ConversationPane({
                 <MessageAttachments items={p.attachments} />
                 {p.failed ? (
                   <button type="button" className="btn btn-sm btn-danger" onClick={() => thread.retrySend(p)}>
-                    Failed — retry
+                    {t("thread.failedRetry")}
                   </button>
                 ) : (
-                  <div className="msg-meta">Sending…</div>
+                  <div className="msg-meta">{t("common.sending")}</div>
                 )}
               </div>
             ))}
@@ -162,7 +162,7 @@ export const ConversationPane = memo(function ConversationPane({
         )}
       </div>
       <div className="typing" aria-live="polite">
-        {contactTyping ? `${contact} is typing…` : ""}
+        {contactTyping ? t("thread.typing", { name: contact }) : ""}
       </div>
 
       <Composer workspaceId={workspaceId} contactLabel={contact} fillTemplate={fillTemplate} onSend={thread.send} onTyping={sendTyping} />
@@ -186,7 +186,11 @@ const ThreadMessages = memo(function ThreadMessages({ messages, contact, seenId 
 
 /** Per row too: merged messages keep their identity, so a new message renders one row, not all. */
 const ThreadMessage = memo(function ThreadMessage({ m, contact, seen }: { m: Message; contact: string; seen: boolean }) {
-  if (m.authorType === "system") return <div className="sys">{SYSTEM_TEXT[m.systemEvent ?? ""]?.(m) ?? m.systemEvent}</div>;
+  const { t, locale } = useI18n();
+  if (m.authorType === "system") {
+    const text = SYSTEM_TEXT[m.systemEvent ?? ""]?.(m);
+    return <div className="sys">{text ? t(...text) : m.systemEvent}</div>;
+  }
   return (
     <div className={`msg ${m.authorType}`}>
       {m.body && (
@@ -196,12 +200,23 @@ const ThreadMessage = memo(function ThreadMessage({ m, contact, seen }: { m: Mes
       )}
       <MessageAttachments items={m.attachments} />
       <div className="msg-meta">
-        {m.authorType === "agent" ? m.author?.name : contact} · {timeFormat.format(m.createdAt)}
-        {seen && " · Seen"}
+        {m.authorType === "agent" ? m.author?.name : contact} · {timeFormat(locale).format(m.createdAt)}
+        {seen && ` · ${t("thread.seen")}`}
       </div>
     </div>
   );
 });
+
+const timeFormats = new Map<string, Intl.DateTimeFormat>();
+/** One formatter per language: long threads format many timestamps. */
+function timeFormat(locale: string): Intl.DateTimeFormat {
+  let format = timeFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
+    timeFormats.set(locale, format);
+  }
+  return format;
+}
 
 function MessageAttachments({ items }: { items: Attachment[] }) {
   if (items.length === 0) return null;

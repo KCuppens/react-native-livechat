@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, onUnauthorized } from "./api";
 import { Layout } from "./components/Layout";
 import { Spinner, Toaster } from "./components/ui";
+import { useI18n } from "./i18n";
 import { FaqPage } from "./pages/Faq";
 import { InboxPage } from "./pages/Inbox";
 import { LoginPage, VerifyPage } from "./pages/Login";
@@ -13,6 +14,7 @@ import { match, useRouter } from "./router";
 
 export function App() {
   const { path, navigate } = useRouter();
+  const { t } = useI18n();
   const [me, setMe] = useState<AgentMe | null | undefined>(undefined);
   const [unread, setUnread] = useState(0);
   const [meFailed, setMeFailed] = useState(false);
@@ -44,10 +46,10 @@ export function App() {
     return meFailed ? (
       <div className="auth">
         <div className="auth-card">
-          <h1>Can't reach the server</h1>
-          <p>Check your connection and try again.</p>
+          <h1>{t("app.unreachable.title")}</h1>
+          <p>{t("app.unreachable.body")}</p>
           <button type="button" className="btn btn-primary" onClick={loadMe}>
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
@@ -74,8 +76,8 @@ export function App() {
     return (
       <div className="auth">
         <div className="auth-card">
-          <h1>No workspaces yet</h1>
-          <p>Ask an admin to invite you to a workspace.</p>
+          <h1>{t("app.noWorkspaces.title")}</h1>
+          <p>{t("app.noWorkspaces.body")}</p>
         </div>
       </div>
     );
