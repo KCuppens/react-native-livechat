@@ -169,6 +169,7 @@ describe("notifications", () => {
     expect(apns.headers.get("apns-topic")).toBe("com.acme.app");
     expect(apns.headers.get("authorization")).toMatch(/^bearer ey/);
     expect(apns.body.aps).toMatchObject({ alert: { title: "owner", body: "We refunded you" }, badge: 1 });
+    expect(apns.body.body).toMatchObject({ type: "livechat", conversationId });
 
     const remaining = await env.DB.prepare("SELECT token FROM push_devices ORDER BY token").all<{ token: string }>();
     expect(remaining.results.map((r) => r.token)).toEqual(["fcm-token-1"]);

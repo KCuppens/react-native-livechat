@@ -45,6 +45,8 @@ export async function sendApns(
         "thread-id": payload.data.conversationId,
       },
       ...payload.data,
+      // expo-notifications reads a remote push's `data` from `body` (tap routing in Expo apps).
+      body: payload.data,
     }),
   });
   if (res.ok) return;
