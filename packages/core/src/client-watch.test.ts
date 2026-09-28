@@ -66,7 +66,7 @@ describe("watching replies", () => {
     expect(server.calls.some((c) => c.path.endsWith("/read"))).toBe(false);
   });
 
-  it("leaves the conversation on screen to its own socket", async () => {
+  it("hands a conversation opened on screen to its own socket and watches it again when released", async () => {
     const { client } = setup();
     await client.init();
     const events: AgentMessageEvent[] = [];
@@ -74,13 +74,20 @@ describe("watching replies", () => {
     client.startWatching();
     await flush();
     await flush();
-    const release = client.openConversation("cv_1");
     const watch = socketFor("cv_1")[0]!;
     watch.open();
-    watch.emit({ type: "message.created", message: message({ id: "msg_9" }) });
+    const release = client.openConversation("cv_1");
+    expect(watch.readyState).toBe(3);
+    await flush();
+    const own = socketFor("cv_1")[1]!;
+    own.open();
+    own.emit({ type: "message.created", message: message({ id: "msg_9" }) });
     expect(events).toHaveLength(0);
     expect(client.state.unreadCount).toBe(0);
+
     release();
+    await flush();
+    expect(socketFor("cv_1")).toHaveLength(3); // watched again
   });
 
   it("closes the watch sockets on stop and watches newly started conversations", async () => {
@@ -101,5 +108,18 @@ describe("watching replies", () => {
     client.stopWatching();
     first.emit({ type: "message.created", message: message({ id: "msg_x" }) });
     expect(client.state.unreadCount).toBe(0);
+  });
+
+  it("keeps conversations the first page doesn't contain", async () => {
+    const { client } = setup([conversation({ id: "cv_2" })]);
+    await client.init();
+    const release = client.openConversation("cv_1"); // e.g. opened from a notification
+    await flush();
+    await flush();
+    client.startWatching();
+    await flush();
+    await flush();
+    expect(client.state.conversations.map((c) => c.id).sort()).toEqual(["cv_1", "cv_2"]);
+    release();
   });
 });

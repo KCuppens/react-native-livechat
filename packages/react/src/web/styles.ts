@@ -17,7 +17,8 @@ export const MESSENGER_CSS = `
 }}
 .lc-root[data-theme="dark"]{--lc-bg:#15171c;--lc-surface:#1e2128;--lc-surface-2:#272b33;--lc-border:#2e323b;--lc-text:#f3f4f6;--lc-muted:#9ca3af;--lc-danger:#f87171}
 .lc-root *,.lc-root *::before,.lc-root *::after{box-sizing:border-box}
-.lc-root button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+/* :where keeps the reset at class specificity, so component rules below (e.g. .lc-cta padding) win by order. */
+.lc-root :where(button){font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .lc-root button:focus-visible,.lc-root a:focus-visible,.lc-root textarea:focus-visible,.lc-root input:focus-visible{outline:2px solid var(--lc-primary);outline-offset:2px}
 .lc-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
@@ -51,7 +52,7 @@ export const MESSENGER_CSS = `
 .lc-hero h1{font-size:24px;line-height:1.25;margin:0;font-weight:700}
 .lc-hero .lc-icon-btn{color:inherit}
 .lc-hero .lc-icon-btn:hover{background:rgba(255,255,255,.15)}
-.lc-home-cards{margin-top:-40px;padding:0 16px 16px;display:flex;flex-direction:column;gap:12px}
+.lc-home-cards{margin-top:-40px;padding:0 16px 16px;display:flex;flex-direction:column;gap:12px;position:relative;z-index:1}
 .lc-card{background:var(--lc-bg);border:1px solid var(--lc-border);border-radius:14px;box-shadow:0 2px 8px rgba(17,24,39,.05);overflow:hidden}
 .lc-card-title{font-size:13px;font-weight:600;color:var(--lc-muted);padding:14px 16px 6px;text-transform:uppercase;letter-spacing:.02em}
 

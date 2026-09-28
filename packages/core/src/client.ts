@@ -481,6 +481,9 @@ export class LiveChatClient {
     if (entry) {
       entry.refs++;
     } else {
+      // Its own socket takes over from the watch socket (one connection per conversation).
+      this.watchSockets.get(conversationId)?.stop();
+      this.watchSockets.delete(conversationId);
       let failedAttempts = 0;
       let opened = false;
       const socket = new ReconnectingSocket({
@@ -536,6 +539,7 @@ export class LiveChatClient {
         e.socket.stop();
         this.sockets.delete(conversationId);
         this.setTyping(conversationId, false);
+        if (this.watching) void this.syncWatch();
       }
     };
   }
@@ -583,7 +587,7 @@ export class LiveChatClient {
     const epoch = this.epoch;
     if (!this.state.conversationsLoaded) {
       try {
-        await this.refreshConversations();
+        await this.mergeConversationPage();
       } catch {
         return; // Retried on the next resume/identify.
       }
@@ -597,7 +601,8 @@ export class LiveChatClient {
       }
     }
     for (const id of wanted) {
-      if (this.watchSockets.has(id)) continue;
+      // An open conversation has its own socket (released → watched again).
+      if (this.watchSockets.has(id) || this.sockets.has(id)) continue;
       const socket = new ReconnectingSocket({
         url: () => this.http.socketUrl(id),
         WebSocket: this.opts.WebSocket,
@@ -606,7 +611,7 @@ export class LiveChatClient {
         // Missed events while disconnected: the server's count is the truth.
         onReconnect: () => {
           void this.refreshUnread();
-          void this.refreshConversations().catch(() => {});
+          void this.mergeConversationPage().catch(() => {});
         },
         onTerminalClose: () => {
           if (this.watchSockets.get(id) === socket) this.watchSockets.delete(id);
@@ -617,8 +622,26 @@ export class LiveChatClient {
     }
   }
 
+  /**
+   * Loads the first conversation page into the list without dropping conversations it doesn't
+   * contain (e.g. an older one open on screen), unlike `refreshConversations`.
+   */
+  private async mergeConversationPage(): Promise<void> {
+    const epoch = this.epoch;
+    const page = await this.http.listConversations();
+    if (epoch !== this.epoch) return;
+    this.store.set((s) => {
+      const fresh = new Set(page.items.map((c) => c.id));
+      return {
+        conversations: [...page.items, ...s.conversations.filter((c) => !fresh.has(c.id))].sort((a, b) => b.lastMessageAt - a.lastMessageAt),
+        conversationsLoaded: true,
+      };
+    });
+  }
+
   private handleWatchEvent(conversationId: string, event: ServerEvent): void {
-    // On screen: the conversation's own socket handles it (and marks it read).
+    // On screen: the conversation's own socket handles it (and marks it read). Guards the window
+    // before the watch socket's close lands.
     if (this.sockets.has(conversationId)) return;
     if (event.type === "status.changed") {
       this.patchConversation(conversationId, { status: event.status });
