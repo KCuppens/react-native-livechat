@@ -5,6 +5,7 @@ import { getMessage, unreadCountForContact } from "../services/conversations";
 import { findWorkspaceById } from "../services/workspaces";
 import { sendApns } from "./apns";
 import { loadPushCredentials } from "./credentials";
+import { sendExpo } from "./expo";
 import { sendFcm } from "./fcm";
 import { InvalidPushToken, type NotificationJob, type PushPayload } from "./types";
 
@@ -41,7 +42,7 @@ async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "a
        JOIN conversations c ON c.contact_id = d.contact_id WHERE c.id = ? AND c.workspace_id = ?`,
     )
       .bind(job.conversationId, job.workspaceId)
-      .all<{ token: string; platform: "ios" | "android"; app_id: string; sandbox: number }>(),
+      .all<{ token: string; platform: "ios" | "android" | "expo"; app_id: string; sandbox: number }>(),
   ]);
   if (!conv || !message) return;
   const devices = job.onlyTokens ? allDevices.filter((d) => job.onlyTokens!.includes(d.token)) : allDevices;
@@ -49,7 +50,10 @@ async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "a
   if (devices.length === 0) return;
 
   // The contact is looking at the conversation: the socket already delivered it.
-  if (await roomStub(env, job.conversationId).isContactConnected()) return;
+  if (await roomStub(env, job.conversationId).isContactConnected()) {
+    console.log({ msg: "push skipped: contact connected", conversationId: job.conversationId });
+    return;
+  }
 
   const [creds, ws, badge] = await Promise.all([
     // Undecryptable credentials (e.g. after an ENCRYPTION_KEY rotation) won't fix themselves on retry.
@@ -73,7 +77,8 @@ async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "a
   await Promise.all(
     devices.map(async (d) => {
       try {
-        if (d.platform === "android" && creds.fcm) await sendFcm(creds.fcm, d.token, payload);
+        if (d.platform === "expo") await sendExpo(d.token, payload, env.EXPO_ACCESS_TOKEN);
+        else if (d.platform === "android" && creds.fcm) await sendFcm(creds.fcm, d.token, payload);
         else if (d.platform === "ios" && creds.apns) await sendApns(creds.apns, { token: d.token, appId: d.app_id, sandbox: d.sandbox === 1 }, payload);
       } catch (err) {
         if (!(err instanceof InvalidPushToken)) {
@@ -90,6 +95,7 @@ async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "a
     }),
   );
   if (failures.length > 0) logError("push failures", failures, job);
+  console.log({ msg: "push sent", conversationId: job.conversationId, devices: devices.length, failed: failures.length });
 
   // Retry transient failures (5xx, timeouts) for just those devices, so devices that already
   // got the push don't get it twice. Rejecting the whole job would re-push to everyone.

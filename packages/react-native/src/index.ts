@@ -19,4 +19,4 @@ export {
   useWorkspaceConfig,
   type MessengerRoute,
 } from "@kobecuppens/livechat-react/hooks";
-export { LiveChatApiError, type LiveChatUser, type PushDeviceRequest } from "@kobecuppens/livechat-core";
+export { LiveChatApiError, type AgentMessageEvent, type LiveChatUser, type PushDeviceRequest } from "@kobecuppens/livechat-core";

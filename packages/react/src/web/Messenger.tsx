@@ -90,12 +90,24 @@ export function Messenger({ inline, primaryColor, theme, className, styleRoot }:
   const panel = useRef<HTMLDivElement>(null);
   const client = useLiveChatClient();
 
-  // Refresh badge/realtime when the page becomes visible again.
+  // Refresh badge/realtime when the page becomes visible again, and keep the visitor's recent
+  // conversations live while it is, so a reply shows on the badge at once even with the panel closed.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const onVisible = () => document.visibilityState === "visible" && client.resume();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    const sync = () => {
+      if (document.visibilityState === "visible") {
+        client.resume();
+        client.startWatching();
+      } else {
+        client.stopWatching();
+      }
+    };
+    if (document.visibilityState === "visible") client.startWatching();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      client.stopWatching();
+    };
   }, [client]);
 
   useEffect(() => {
@@ -179,8 +191,7 @@ export function Launcher({ primaryColor, theme, styleRoot }: ThemeProps & { styl
   const style = useThemeStyle(primaryColor);
   const client = useLiveChatClient();
 
-  // The badge has no realtime channel outside an open conversation; poll gently, and only while
-  // the tab is visible (Messenger's visibilitychange handler refreshes when it becomes visible).
+  // Safety net for the badge; Messenger keeps recent conversations live while the tab is visible.
   useEffect(() => {
     const id = setInterval(() => {
       if (typeof document === "undefined" || document.visibilityState === "visible") void client.refreshUnread();

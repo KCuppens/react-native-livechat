@@ -17,6 +17,8 @@ export interface Env {
   ENCRYPTION_KEY: string;
   /** Signs attachment download URLs (kept separate so rotating contact sessions doesn't break file links). */
   ATTACHMENT_SIGNING_KEY: string;
+  /** Optional: Expo access token, for Expo projects with enhanced push security (platform "expo" devices). */
+  EXPO_ACCESS_TOKEN?: string;
 }
 
 type AppEnv = Env;
