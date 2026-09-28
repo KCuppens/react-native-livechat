@@ -29,6 +29,12 @@ export interface LiveChatProviderProps extends Omit<BaseProps, "storage" | "chil
    */
   pickAttachment?: () => Promise<PickedFile | null>;
   storage?: BaseProps["storage"];
+  /**
+   * Keep the contact's recent conversations live while the app is in the foreground, so agent
+   * replies update `useUnreadCount` on any screen and reach `LiveChat.onAgentMessage` (default true).
+   * Sockets close when the app goes to the background; pushes cover that case.
+   */
+  watchReplies?: boolean;
   children: ReactNode;
 }
 
@@ -72,7 +78,7 @@ export const LiveChat = {
   },
 };
 
-function Bridge() {
+function Bridge({ watchReplies }: { watchReplies: boolean }) {
   const client = useLiveChatClient();
   const messenger = useMessenger();
   controls = messenger;
@@ -90,15 +96,25 @@ function Bridge() {
     };
   }, [client]);
 
-  // Reconnect realtime and refresh the badge when the app returns to the foreground.
+  // Reconnect realtime and refresh the badge when the app returns to the foreground; watch
+  // replies only while it's there (a backgrounded app gets pushes instead).
   const last = useRef(AppState.currentState);
   useEffect(() => {
+    if (watchReplies && AppState.currentState === "active") client.startWatching();
     const sub = AppState.addEventListener("change", (next) => {
-      if (/inactive|background/.test(last.current ?? "") && next === "active") client.resume();
+      if (/inactive|background/.test(last.current ?? "") && next === "active") {
+        client.resume();
+        if (watchReplies) client.startWatching();
+      } else if (next === "background") {
+        client.stopWatching();
+      }
       last.current = next;
     });
-    return () => sub.remove();
-  }, [client]);
+    return () => {
+      sub.remove();
+      client.stopWatching();
+    };
+  }, [client, watchReplies]);
 
   useEffect(() => () => {
     if (controls === messenger) controls = null;
@@ -106,11 +122,11 @@ function Bridge() {
   return null;
 }
 
-export function LiveChatProvider({ pickAttachment, storage, children, ...props }: LiveChatProviderProps) {
+export function LiveChatProvider({ pickAttachment, storage, watchReplies = true, children, ...props }: LiveChatProviderProps) {
   return (
     <BaseProvider {...props} storage={storage ?? asyncStorageAdapter}>
       <PickerContext.Provider value={pickAttachment}>
-        <Bridge />
+        <Bridge watchReplies={watchReplies} />
         {children}
       </PickerContext.Provider>
     </BaseProvider>

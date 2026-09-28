@@ -83,9 +83,13 @@ export const CsatRequest = z.object({
 export type CsatRequest = z.infer<typeof CsatRequest>;
 
 export const PushDeviceRequest = z.object({
-  platform: z.enum(["ios", "android"]),
-  /** Native push token: hex for APNs, [A-Za-z0-9_:-] for FCM. Goes into URLs, so the charset is strict. */
-  token: z.string().min(1).max(4096).regex(/^[A-Za-z0-9_:.-]+$/, "invalid push token"),
+  /** `expo`: an Expo push token (ExponentPushToken[…]); delivered through Expo's push service. */
+  platform: z.enum(["ios", "android", "expo"]),
+  /**
+   * Native push token: hex for APNs, [A-Za-z0-9_:-] for FCM, ExponentPushToken[…] for Expo.
+   * Goes into URLs (encoded), so the charset is strict.
+   */
+  token: z.string().min(1).max(4096).regex(/^[A-Za-z0-9_:.\-[\]]+$/, "invalid push token"),
   /** iOS bundle id / Android package name; selects the APNs topic. */
   appId: z.string().min(1).max(256),
   /** iOS only: true when the build uses the APNs sandbox (development). */

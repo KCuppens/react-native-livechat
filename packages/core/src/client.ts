@@ -88,6 +88,15 @@ interface LoadEntry {
   resolveNext?: () => void;
 }
 
+/** An agent reply that arrived through a watch socket while its conversation wasn't open. */
+export interface AgentMessageEvent {
+  conversationId: string;
+  message: Message;
+}
+
+/** Conversations kept live by `startWatching` (most recent first). */
+const MAX_WATCHED_CONVERSATIONS = 5;
+
 /** Local id for the not-yet-created conversation used by `sendMessage(null, …)`. */
 export const DRAFT_CONVERSATION = "draft";
 
@@ -165,6 +174,16 @@ export class LiveChatClient {
   private pushPending = false;
   /** identify() calls run one at a time, in call order, so the latest call wins. */
   private identifyQueue: Promise<void> = Promise.resolve();
+  /**
+   * Background sockets on the contact's recent conversations while the host app is in the
+   * foreground (`startWatching`), so agent replies update the badge (and reach
+   * `onAgentMessage` listeners) on any screen. Unlike `openConversation` they don't mark read.
+   */
+  private watchSockets = new Map<string, ReconnectingSocket>();
+  private watching = false;
+  /** Agent messages already counted by a watch socket (a reconnect backfill must not count them twice). */
+  private watchSeen = new Set<string>();
+  private agentMessageListeners = new Set<(event: AgentMessageEvent) => void>();
   /** Bodies of pending sends, kept for retry. */
   private outbox = new Map<string, { conversationId: string | null; body: string; attachmentIds: string[] }>();
 
@@ -224,6 +243,7 @@ export class LiveChatClient {
           status: "ready",
         });
         void this.refreshUnread();
+        if (this.watching) void this.syncWatch();
       } catch (err) {
         this.initPromise = null;
         this.store.set({ status: "error", error: err instanceof Error ? err.message : String(err) });
@@ -236,6 +256,7 @@ export class LiveChatClient {
   destroy(): void {
     for (const { socket } of this.sockets.values()) socket.stop();
     this.sockets.clear();
+    this.stopWatching();
     this.clearTimers();
   }
 
@@ -283,6 +304,7 @@ export class LiveChatClient {
     await this.ensureSession(previous && !previous.userId ? previous.token : undefined);
     void this.syncPushDevice();
     void this.refreshUnread();
+    if (this.watching) void this.syncWatch();
   }
 
   /** Registers the push device with the current identity if a previous attempt didn't. */
@@ -389,6 +411,9 @@ export class LiveChatClient {
     this.epoch++;
     for (const { socket } of this.sockets.values()) socket.stop();
     this.sockets.clear();
+    for (const socket of this.watchSockets.values()) socket.stop();
+    this.watchSockets.clear();
+    this.watchSeen.clear();
     this.clearTimers();
     this.outbox.clear();
     this.startingConversation = null;
@@ -430,10 +455,13 @@ export class LiveChatClient {
   }
 
   private upsertConversation(conversation: Conversation): void {
+    const isNew = !this.state.conversations.some((c) => c.id === conversation.id);
     this.store.set((s) => {
       const rest = s.conversations.filter((c) => c.id !== conversation.id);
       return { conversations: [conversation, ...rest].sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
     });
+    // e.g. the contact just started one: watch it too.
+    if (isNew && this.watching) void this.syncWatch();
   }
 
   private patchConversation(id: string, patch: Partial<Conversation>): void {
@@ -515,8 +543,106 @@ export class LiveChatClient {
   /** Reconnect all sockets now, e.g. when the app returns to the foreground. */
   resume(): void {
     for (const { socket } of this.sockets.values()) socket.nudge();
+    for (const socket of this.watchSockets.values()) socket.nudge();
     void this.refreshUnread();
     if (this.session) void this.syncPushDevice();
+  }
+
+  // ---------------------------------------------------------------- watching
+
+  /**
+   * Keeps the contact's recent conversations live in the background (call while the app is in
+   * the foreground; `stopWatching` when it leaves). Agent replies then bump `unreadCount` and the
+   * conversation's preview at once and are passed to `onAgentMessage` listeners, without marking
+   * anything read. Only contacts with a session are watched: anonymous visitors that never chatted
+   * have nothing to watch.
+   */
+  startWatching(): void {
+    if (this.watching) return;
+    this.watching = true;
+    void this.syncWatch();
+  }
+
+  stopWatching(): void {
+    this.watching = false;
+    for (const socket of this.watchSockets.values()) socket.stop();
+    this.watchSockets.clear();
+  }
+
+  /** Called for agent replies seen by a watch socket (not for the conversation open on screen). */
+  onAgentMessage(listener: (event: AgentMessageEvent) => void): () => void {
+    this.agentMessageListeners.add(listener);
+    return () => {
+      this.agentMessageListeners.delete(listener);
+    };
+  }
+
+  /** Opens watch sockets for the most recent conversations (and closes the rest). */
+  private async syncWatch(): Promise<void> {
+    if (!this.watching || !this.session) return;
+    const epoch = this.epoch;
+    if (!this.state.conversationsLoaded) {
+      try {
+        await this.refreshConversations();
+      } catch {
+        return; // Retried on the next resume/identify.
+      }
+    }
+    if (!this.watching || epoch !== this.epoch) return;
+    const wanted = new Set(this.state.conversations.slice(0, MAX_WATCHED_CONVERSATIONS).map((c) => c.id));
+    for (const [id, socket] of this.watchSockets) {
+      if (!wanted.has(id)) {
+        socket.stop();
+        this.watchSockets.delete(id);
+      }
+    }
+    for (const id of wanted) {
+      if (this.watchSockets.has(id)) continue;
+      const socket = new ReconnectingSocket({
+        url: () => this.http.socketUrl(id),
+        WebSocket: this.opts.WebSocket,
+        onEvent: (e) => this.handleWatchEvent(id, e),
+        onStateChange: () => {},
+        // Missed events while disconnected: the server's count is the truth.
+        onReconnect: () => {
+          void this.refreshUnread();
+          void this.refreshConversations().catch(() => {});
+        },
+        onTerminalClose: () => {
+          if (this.watchSockets.get(id) === socket) this.watchSockets.delete(id);
+        },
+      });
+      this.watchSockets.set(id, socket);
+      socket.start();
+    }
+  }
+
+  private handleWatchEvent(conversationId: string, event: ServerEvent): void {
+    // On screen: the conversation's own socket handles it (and marks it read).
+    if (this.sockets.has(conversationId)) return;
+    if (event.type === "status.changed") {
+      this.patchConversation(conversationId, { status: event.status });
+      return;
+    }
+    if (event.type !== "message.created") return;
+    const msg = event.message;
+    this.patchConversation(conversationId, { lastMessage: msg, lastMessageAt: msg.createdAt });
+    if (this.state.threads[conversationId]?.loaded) {
+      this.updateThread(conversationId, (t) => ({ messages: mergeMessages(t.messages, [msg]) }));
+    }
+    if (msg.authorType !== "agent" || this.watchSeen.has(msg.id)) return;
+    this.watchSeen.add(msg.id);
+    this.store.set((s) => ({
+      unreadCount: s.unreadCount + 1,
+      conversations: s.conversations.map((c) => (c.id === conversationId ? { ...c, unreadCount: c.unreadCount + 1 } : c)),
+    }));
+    for (const listener of this.agentMessageListeners) {
+      try {
+        listener({ conversationId, message: msg });
+      } catch {
+        // A host listener must not break the socket.
+      }
+    }
   }
 
   /** Reloads a conversation whose last load failed (`thread.error`). */

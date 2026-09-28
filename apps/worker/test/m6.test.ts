@@ -174,6 +174,38 @@ describe("notifications", () => {
     expect(remaining.results.map((r) => r.token)).toEqual(["fcm-token-1"]);
   });
 
+  it("pushes to Expo push tokens without workspace credentials and drops unregistered ones", async () => {
+    const ctx = await withConversation();
+    for (const token of ["ExponentPushToken[aaaa]", "ExponentPushToken[gone]"]) {
+      const res = await ctx.publicCall("/v1/push-devices", { method: "POST", token: ctx.contactToken, body: json({ platform: "expo", token, appId: "com.acme.app" }) });
+      expect(res.status).toBe(204);
+    }
+    const reply = (await (await ctx.admin.call(`${ctx.base}/conversations/${ctx.conversationId}/messages`, { method: "POST", body: json({ clientId: "agent-client-1", body: "We refunded you" }) })).json()) as Message;
+
+    const sent: any[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (!String(input).startsWith("https://exp.host/")) throw new Error(`unexpected ${String(input)}`);
+      const body = JSON.parse(String(init?.body));
+      sent.push(body);
+      return Response.json({
+        data: body.to.includes("gone") ? { status: "error", message: "not registered", details: { error: "DeviceNotRegistered" } } : { status: "ok", id: "ticket" },
+      });
+    });
+
+    await handleNotification(env, { type: "agent_reply", workspaceId: ctx.ws.id, conversationId: ctx.conversationId, messageId: reply.id });
+
+    expect(sent).toHaveLength(2);
+    expect(sent.find((b) => b.to === "ExponentPushToken[aaaa]")).toMatchObject({
+      title: "owner",
+      body: "We refunded you",
+      badge: 1,
+      channelId: "livechat",
+      data: { type: "livechat", conversationId: ctx.conversationId },
+    });
+    const remaining = await env.DB.prepare("SELECT token FROM push_devices WHERE platform = 'expo'").all<{ token: string }>();
+    expect(remaining.results.map((r) => r.token)).toEqual(["ExponentPushToken[aaaa]"]);
+  });
+
   it("emails an unread reply digest once, and not when already read", async () => {
     const { ws, conversationId, reply, publicCall, contactToken } = await agentReply();
     await env.DB.prepare("UPDATE contacts SET email = 'kim@example.com'").run();
@@ -203,7 +235,8 @@ describe("notifications", () => {
     const { ws, conversationId } = await withConversation();
     const before = devOutbox.length;
     await handleNotification(env, { type: "new_conversation", workspaceId: ws.id, conversationId });
-    const mail = devOutbox.slice(before).find((m) => m.to === "owner@acme.com");
+    // Match this conversation: queued jobs from earlier tests can mail the same owner meanwhile.
+    const mail = devOutbox.slice(before).find((m) => m.to === "owner@acme.com" && m.text.includes(conversationId));
     expect(mail?.subject).toBe("[Acme] New conversation from Kim");
     expect(mail?.text).toContain(`/w/${ws.id}/inbox/${conversationId}`);
   });
