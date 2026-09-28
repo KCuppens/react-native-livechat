@@ -50,7 +50,10 @@ async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "a
   if (devices.length === 0) return;
 
   // The contact is looking at the conversation: the socket already delivered it.
-  if (await roomStub(env, job.conversationId).isContactConnected()) return;
+  if (await roomStub(env, job.conversationId).isContactConnected()) {
+    console.log({ msg: "push skipped: contact connected", conversationId: job.conversationId });
+    return;
+  }
 
   const [creds, ws, badge] = await Promise.all([
     // Undecryptable credentials (e.g. after an ENCRYPTION_KEY rotation) won't fix themselves on retry.
@@ -92,6 +95,7 @@ async function pushAgentReply(env: Env, job: Extract<NotificationJob, { type: "a
     }),
   );
   if (failures.length > 0) logError("push failures", failures, job);
+  console.log({ msg: "push sent", conversationId: job.conversationId, devices: devices.length, failed: failures.length });
 
   // Retry transient failures (5xx, timeouts) for just those devices, so devices that already
   // got the push don't get it twice. Rejecting the whole job would re-push to everyone.
