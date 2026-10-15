@@ -15,7 +15,7 @@ permissions:
 jobs:
   release:
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     permissions:
       contents: write
       pull-requests: write
@@ -57,7 +57,7 @@ jobs:
     needs: release
     # A stale run must not deploy an older commit after (or racing) the newer commit's own run.
     if: ${{ vars.DEPLOY_WORKER == 'true' && needs.release.outputs.stale != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     # Protection rules (required reviewers, branch restrictions) and the Cloudflare secrets live
     # on this GitHub environment.
     environment: production
