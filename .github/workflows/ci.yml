@@ -1,8 +1,16 @@
 name: CI
 on:
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
 
 # Least privilege: CI only reads the repo (it also runs PR code).
 permissions:
@@ -16,6 +24,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubicloud-standard-2
+    timeout-minutes: 15
     steps:
       # Third-party actions are pinned to commit SHAs (tags can be moved).
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
